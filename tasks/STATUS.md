@@ -4,7 +4,45 @@ Updated: 2026-10-19 (Europe/London)
 
 Current position: **M0–M1 complete; Canvas polling sync, calendar UI, deterministic assignment planning, and local assignment completion tracking are implemented and verified with fixtures. M2–M5 remain partial overall.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
 
-## Latest task — separate Canvas data and Demo Mode (2026-10-19)
+## Latest task — Apple Calendar integration (2026-10-19)
+
+### Scope and delivered behavior
+
+Implemented the user-authorized Apple Calendar integration slice on `feature/calendar-integration`, in `/Users/davidzhu/Desktop/academic-time-manager-calendar`. The original project working files were not modified. No next milestone was started, no branch was merged, and no remote is configured. M2/M4 remain partial overall; this report supersedes the older EventKit “not implemented” notes below.
+
+- Native, lazy EventKit adapter with explicit macOS full-access permission action, denied/restricted/write-only/revoked handling, account selection, and separate approval for dedicated **Academic AI Time Manager** calendar creation. No automatic permission or calendar read on launch.
+- Existing calendar busy times participate in live planning and publication conflict checks. Demo Mode does not read Calendar or publish samples. Personal events stay transient; no new source-classification or SQLite coupling with Outlook.
+- Exact before/after previews and explicit approval for create/update/cancel/undo. Approval expires after five minutes or the earliest plan deadline; input/progress/mode/sync changes invalidate proposals. Reads and ownership/conflict checks repeat before writes, including between operations.
+- Stable task/session keys, UUID markers, exact content checks and persistent calendar/event identifiers prevent repeated publication and protect unrelated events. A personal event in the dedicated calendar is still not eligible for mutation. External edits/moves/deletion/recurrence/alarms and duplicate markers stop updates.
+- Atomic mode-0600 ownership journal with durable write intents, confirmation audit, undo history and read-only recovery. No blind retry after uncertain create/save outcomes. Earlier confirmed operations in a partial batch remain visible. Undo requires a fresh preview and approval, one event operation at a time.
+- A small UI bridge and packaging usage-description entry; modular Calendar source files minimize Outlook merge conflicts. A tracked privacy resource fixes the pre-existing missing directory declared by Package.swift in this clean worktree.
+
+### Files changed
+
+New: `Sources/AcademicCore/AppleCalendar.swift`, `EventKitCalendarClient.swift`, `CalendarAwarePlanning.swift`; `Sources/AcademicTimeManager/AppleCalendarUI.swift`, `Resources/CalendarPrivacy.txt`; `Tests/AcademicTimeManagerTests/AppleCalendarTests.swift`; `docs/APPLE_CALENDAR.md`.
+
+Modified: `Sources/AcademicTimeManager/App.swift`, `scripts/package-macos.sh`, `README.md`, `docs/ARCHITECTURE.md`, `docs/INTEGRATIONS.md`, `docs/SECURITY.md`, and `tasks/STATUS.md`. No Outlook implementation or database schema file changed.
+
+### Verification
+
+- Debug: `swift test --disable-sandbox` — **79 passed, 0 failures**.
+- Release: `swift test -c release --disable-sandbox` — **79 passed, 0 failures**.
+- Includes all 52 existing tests plus 27 Calendar tests: explicit permissions, stale/replayed/expired approval, duplicate prevention/restart, ownership, external changes, busy/free/all-day boundaries, conflict races, revocation, unavailable accounts, storage failures, partial writes, crash recovery, cancellation, undo, DST, actual planner constraints and Demo isolation.
+- The tests use only injected in-memory clients, synthetic events, and temporary journal files. They never construct the native EventKit adapter, access real Calendar/Keychain/credentials, or request permissions. Native EventKit and SwiftUI compile in both configurations.
+- `git diff --check` passes. The initial debug build found the missing Resources directory; adding the tracked privacy resource fixed it. Final builds have no compiler warnings.
+- `sh scripts/package-macos.sh` succeeded. Ad-hoc signing, `codesign --verify --deep --strict`, and `plutil -lint` passed; the full-access usage description is present. Bundle: `/Users/davidzhu/Desktop/academic-time-manager-calendar/build-output/AcademicTimeManager.app`. The app has not been launched.
+- Implementation commit: `53b454c` (`Implement approval-controlled Apple Calendar integration`). Documentation/status are recorded in a separate local commit. No push or merge was performed.
+
+### Limitations and manual gate
+
+- EventKit confirms local saves, not remote iCloud/Exchange sync completion. Offline cached reads cannot establish server freshness. Conflict checks cannot make external Calendar edits transactionally atomic with writes.
+- A missing uncertain create stays blocked; recovery never guesses or blindly recreates it. Missing/externally changed ownership and same-name calendar conflicts need manual inspection. The journal must be retained.
+- Existing managed sessions count as busy during regeneration. Omitted sessions are kept until explicitly canceled. Reads are user-initiated and bounded to a year; personal events are not yet imported into the app's persistent Timeline. Published sessions appear in Connections and Apple Calendar.
+- One running app instance is supported; multi-process journal locking and retention/encryption policy remain hardening work. Signing is local ad-hoc, not notarized distribution. Live permission/account behavior and visual accessibility require user testing.
+- When ready, follow [the test-account checklist](../docs/APPLE_CALENDAR.md#user-led-manual-verification-only-when-ready): confirm no launch prompt, denial/revocation handling, dedicated-calendar setup, busy-time avoidance, preview without writes, approved repeat/update/cancel/undo, external-edit protection and DST. Start Calendar permission testing only at the user's direction.
+- Approval gate: user review/manual verification of this integration before any next milestone or merge. No next milestone approval is assumed.
+
+## Previous task — separate Canvas data and Demo Mode (2026-10-19)
 
 ### Delivered behavior
 
@@ -84,9 +122,9 @@ A related availability bug constructed a reversed date interval when today's stu
 |---|---|---|
 | M0 — Architecture and scaffolding | Complete | Weighted stack decision, native Swift app shell, project setup, feasibility review. |
 | M1 — Local app and canonical model | Complete | SQLite persistence, provenance, demo timeline, review decisions, availability settings. |
-| M2 — Account integrations | Partial | Oxford Canvas read-only sync is implemented and mock-tested. Microsoft Graph is not implemented. EventKit is not implemented; no real account or permission prompt was used. |
+| M2 — Account integrations | Partial | Oxford Canvas read-only sync is implemented and mock-tested. Microsoft Graph UI/registration remains outside this branch. EventKit adapter, controlled authorization/setup and mock-tested writes are implemented; no real account or permission prompt was used. |
 | M3 — Academic intelligence | Partial | Provider-independent analysis protocol and validation exist. Editable effort estimates and deterministic assignment stages are available; no inference provider or email extraction is active. |
-| M4 — Scheduling and calendar | Partial | Day/week/month calendar UI and deterministic local proposals are implemented. No EventKit publication, approval workflow, undo, or audit-linked scheduling is wired. |
+| M4 — Scheduling and calendar | Partial | Day/week/month calendar UI and deterministic local proposals are implemented. EventKit preview/approval, safe publication, cancellation, undo and ownership audit are wired. End-to-end live acceptance and unified Calendar event import remain unverified. |
 | M5 — Hardening and packaging | Partial | Debug/release suites pass; local ad-hoc-signed app bundle builds. No notarization, Developer ID signing, or in-app visual smoke test. |
 
 ## Previous session — implemented behavior

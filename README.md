@@ -35,6 +35,12 @@ Open **Plan preview** and use each assignment's **Local status** menu to select 
 
 Only unfinished assignments with future deadlines receive new study sessions. Past deadlines appear under **Overdue**; undated assignments appear under **No deadline**. Reopening an overdue assignment does not change its deadline or schedule new work. Generate a new proposal after changing status. Where Canvas supplies submission evidence, the app offers a completion suggestion for you to confirm; it never changes your Canvas submission or automatically marks local work finished.
 
+## Apple Calendar
+
+When ready to test, open **Connections → Apple Calendar**, explicitly request Calendar access, select an account, and approve creation of the dedicated **Academic AI Time Manager** calendar. Generate a live plan, select **Preview Apple Calendar changes**, then approve the exact changes. Previewing alone makes no writes. Demo plans cannot be published.
+
+Connections also offers previewed cancellation and undo of the last event change. After restarting, use **Refresh connection** before calendar-aware planning. Personal events are used locally as busy constraints; only owned study sessions can be changed. See [Apple Calendar integration](docs/APPLE_CALENDAR.md) for recovery limits and the user-led test-account checklist. No real calendar was accessed during development.
+
 ## Project map
 - `AGENTS.md` — Codex execution contract.
 - `docs/PRD.md` — product requirements and acceptance criteria.
