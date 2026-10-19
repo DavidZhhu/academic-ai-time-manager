@@ -29,6 +29,14 @@ The app opens in **Live data** mode, showing cached Oxford Canvas data, approved
 
 Switching modes clears the current proposal without deleting records or changing completion status. Mode selection lasts for the current session; restarting returns to Live data. Sync is disabled in Demo Mode. An empty Canvas cache stays empty until you initiate a sync; it never falls back to sample assignments.
 
+## Calendar interface (Stage 1)
+
+**Timeline** has a mini-calendar and source filters on the left, a Day/Week/Month calendar in the centre, and an academic task panel on the right. Week and Day place events at their actual times, with overlapping events beside one another and all-day events in a separate band. Month dates open their Day view; selecting an event opens its details and source information. Deadlines have a flag and dashed border.
+
+Use Previous/Next or **⌘← / ⌘→**, **Today** or **⌘T**, and the Day/Week/Month selector to navigate. Toggle tasks with the toolbar's right-sidebar button or `⌘⌥\`. Panels resize; narrow week/month views scroll horizontally. Date, view, filters, and task-panel visibility survive navigation to other app pages during the session.
+
+Source filters hide calendar entries without changing study constraints. The task panel reuses saved local completion status; effort/priority values edited in Plan preview appear there too. Event creation, dragging and resizing await Stage 2 approval. No real account or personal Calendar access was used to develop the redesign.
+
 ## Connect Microsoft Outlook
 
 See [Microsoft setup](docs/MICROSOFT_SETUP.md) for the Entra registration and consent steps. In **Connections**, enter the non-secret client ID, save settings, and choose **Add Microsoft account** separately for Oxford and personal Outlook/Hotmail. Microsoft handles login in a browser; the application stores tokens in Keychain. Use each account's **Synchronise now** button, then review proposals in **Review inbox**. Polling is optional and off by default. Outlook sync and review never write to mailboxes or publish to Apple Calendar. Calendar publication uses the separate preview and approval flow below.
