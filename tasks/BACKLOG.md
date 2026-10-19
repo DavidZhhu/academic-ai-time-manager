@@ -10,10 +10,10 @@ Priority: P0 required for MVP, P1 after MVP. Real services remain gated on user/
 | T004 | M1 | P0 | Implement canonical entities and migrations | SQLite migrations and serialization tests | Complete |
 | T005 | M1 | P0 | Build sample-data timeline and review UI | Timeline, review inbox, availability settings | Complete |
 | T006 | M2 | P0 | Canvas incremental importer | Mock pagination/retry, transactional import, repeat-sync tests | Complete for polling merge: active courses, assignments/deadlines, calendar events, pagination, retries, timezone, idempotent SQLite merge, last-success status; Canvas has no shared delta cursor for these endpoints |
-| T007 | M2 | P0 | Microsoft Graph PKCE and mail importer | Mock auth, delta and filtering tests | Gated: app registration/scopes unknown |
+| T007 | M2 | P0 | Microsoft Graph PKCE and mail importer | Mock auth, delta and filtering tests | Implemented with mocks: multi-account PKCE/Keychain, read-only Inbox delta, periodic polling, attachment extraction, review; real login awaits registration/consent |
 | T008 | M2 | P0 | EventKit adapter | Dedicated-calendar idempotency tests | Gated: no permission prompt or account access |
 | T009 | M3 | P0 | Provider-independent AI gateway | Schema validation and failure tests | Partial: protocol and fixture provider only |
-| T010 | M3 | P0 | Academic email classification and extraction | Precision review on fixtures | Not started |
+| T010 | M3 | P0 | Academic email classification and extraction | Precision review on fixtures | Implemented deterministic local provider and shared rules; general language/relative-date inference remains limited |
 | T011 | M3 | P0 | Assignment decomposition and effort estimates | Editable outputs and evidence | Partial: deterministic editable effort and stage breakdown in local plan UI; provider interface/validator remain fixture-only |
 | T012 | M4 | P0 | Constraint scheduler | No-overlap, deadline, protected-time tests | Partial: deterministic core and UI proposal; fixed events, protected rest, breaks, priority, source, and local rescheduling covered; no calendar publication |
 | T013 | M4 | P0 | Approval, conflict, audit and undo | Conflict and rollback tests | Partial: conflict/approval/audit storage, no UI/write/undo |

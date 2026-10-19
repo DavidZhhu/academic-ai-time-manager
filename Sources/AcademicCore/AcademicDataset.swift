@@ -3,7 +3,7 @@ import Foundation
 public enum StudyDataMode: String, CaseIterable, Sendable {
     case live, demo
 
-    public var label: String { self == .live ? "Canvas data" : "Demo Mode" }
+    public var label: String { self == .live ? "Live data" : "Demo Mode" }
 }
 
 public extension SourceRecord {
@@ -13,7 +13,7 @@ public extension SourceRecord {
         if ["source-canvas-demo", "source-outlook-demo"].contains(id) { return .demo }
         switch provider {
         case "Canvas (sample)", "Outlook (sample)": return .demo
-        case "Canvas": return .live
+        case "Canvas", "Outlook": return .live
         default: return nil
         }
     }

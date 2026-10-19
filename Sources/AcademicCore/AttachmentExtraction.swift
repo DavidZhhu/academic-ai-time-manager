@@ -35,15 +35,17 @@ public struct SafeAttachmentExtractor: EmailAttachmentExtracting {
         let archive = try BoundedWordArchive(data: data)
         let document = try archive.file("word/document.xml")
         for name in archive.names where name.hasSuffix(".rels") {
-            let relationship = String(decoding: try archive.file(name), as: UTF8.self).lowercased()
-            guard !relationship.contains("targetmode=\"external\"") && !relationship.contains("targetmode='external'") else { throw OutlookError.attachment }
+            let data = try archive.file(name)
+            guard !data.contains(0), let xml = String(data: data, encoding: .utf8) else { throw OutlookError.attachment }
+            let relationship = xml.lowercased()
+            guard relationship.range(of: #"targetmode\s*=\s*[\"']external[\"']"#, options: .regularExpression) == nil else { throw OutlookError.attachment }
         }
         return try WordTextParser.text(document)
     }
 }
 
 private struct BoundedWordArchive {
-    struct Entry { let method: Int; let packed: Int; let size: Int; let offset: Int }
+    struct Entry { let method: Int; let packed: Int; let size: Int; let offset: Int; let crc: UInt32 }
     let data: Data
     let entries: [String: Entry]
     var names: [String] { Array(entries.keys) }
@@ -71,7 +73,7 @@ private struct BoundedWordArchive {
             guard !name.hasPrefix("/"), !name.contains(".."), !name.contains("\\"), entries[name] == nil,
                   !lower.contains("vba"), !lower.contains("embeddings/"), !lower.contains("activex"), !lower.hasSuffix(".exe") else { throw OutlookError.attachment }
             total += size; guard total <= 20_000_000 else { throw OutlookError.attachment }
-            entries[name] = Entry(method: method, packed: packed, size: size, offset: offset)
+            entries[name] = Entry(method: method, packed: packed, size: size, offset: offset, crc: UInt32(try u32(cursor+16)))
             cursor += 46+length+extra+comment
         }
         guard entries["[Content_Types].xml"] != nil, entries["word/document.xml"] != nil else { throw OutlookError.attachment }
@@ -84,7 +86,12 @@ private struct BoundedWordArchive {
         let start = e.offset+30+u16(e.offset+26)+u16(e.offset+28)
         guard start <= data.count, e.packed <= data.count-start else { throw OutlookError.attachment }
         let input = Data(data[start..<(start+e.packed)])
-        if e.method == 0 { guard input.count == e.size else { throw OutlookError.attachment }; return input }
+        func checked(_ value: Data) throws -> Data {
+            let checksum = value.withUnsafeBytes { bytes in crc32(0, bytes.bindMemory(to: Bytef.self).baseAddress, uInt(value.count)) }
+            guard UInt32(checksum) == e.crc else { throw OutlookError.attachment }
+            return value
+        }
+        if e.method == 0 { guard input.count == e.size else { throw OutlookError.attachment }; return try checked(input) }
         var stream = z_stream()
         guard inflateInit2_(&stream, -MAX_WBITS, ZLIB_VERSION, Int32(MemoryLayout<z_stream>.size)) == Z_OK else { throw OutlookError.attachment }
         defer { inflateEnd(&stream) }
@@ -98,14 +105,14 @@ private struct BoundedWordArchive {
             }
         }
         guard status == Z_STREAM_END, stream.total_out == e.size, stream.total_in == e.packed else { throw OutlookError.attachment }
-        return output.prefix(e.size)
+        return try checked(Data(output.prefix(e.size)))
     }
 }
 
 private final class WordTextParser: NSObject, XMLParserDelegate {
     var text = ""; var inText = false
     static func text(_ data: Data) throws -> String {
-        let raw = String(decoding: data, as: UTF8.self)
+        guard !data.contains(0), let raw = String(data: data, encoding: .utf8) else { throw OutlookError.attachment }
         guard !raw.localizedCaseInsensitiveContains("<!DOCTYPE"), !raw.localizedCaseInsensitiveContains("<!ENTITY") else { throw OutlookError.attachment }
         let delegate = WordTextParser(); let parser = XMLParser(data: data)
         parser.shouldResolveExternalEntities = false; parser.delegate = delegate

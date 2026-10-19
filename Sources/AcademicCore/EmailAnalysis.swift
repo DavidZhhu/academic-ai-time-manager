@@ -31,7 +31,7 @@ public struct LocalEmailAnalysisProvider: EmailAnalysisProvider {
             if date == nil && result.contains(where: { $0.date == nil && $0.kind == kind }) { continue }
             let evidence = String(line.prefix(1000))
             let title = String(input.subject.prefix(250))
-            let identity = input.sourceID + ":" + (input.attachmentName ?? "body") + ":" + kind.rawValue + ":" + evidence
+            let identity = [input.sourceID, input.attachmentName ?? "body", kind.rawValue, evidence, title, String(date?.timeIntervalSince1970 ?? -1)].joined(separator: ":")
             result.append(EmailProposal(id: "outlook-review-" + outlookDigest(identity), accountID: input.accountID,
                 messageID: input.messageID, sourceID: input.sourceID, title: title.isEmpty ? "Email commitment" : title,
                 kind: kind, date: date, durationMinutes: kind == .deadline || kind == .task ? 0 : 60,
@@ -87,7 +87,8 @@ public enum EmailAnalysisValidator {
     public static func validate(_ proposals: [EmailProposal], input: EmailAnalysisInput) throws {
         guard proposals.count <= 30, Set(proposals.map(\.id)).count == proposals.count else { throw OutlookError.invalidResponse }
         for p in proposals {
-            guard p.accountID == input.accountID, p.messageID == input.messageID, p.sourceID == input.sourceID,
+            guard p.id.hasPrefix("outlook-review-"), p.attachmentName == input.attachmentName,
+                  p.accountID == input.accountID, p.messageID == input.messageID, p.sourceID == input.sourceID,
                   p.confidence.isFinite, (0...1).contains(p.confidence), !p.title.isEmpty, p.title.count <= 250,
                   !p.evidence.isEmpty, p.evidence.count <= 1000, input.text.contains(p.evidence),
                   p.decision == .pending, !p.withdrawn, (0...1440).contains(p.durationMinutes) else { throw OutlookError.invalidResponse }

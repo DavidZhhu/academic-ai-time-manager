@@ -32,3 +32,13 @@ Verify university policies, applicable data handling rules, and API terms before
 - Analysis output is validated for assignment identity, confidence range, unique task IDs, bounded effort estimates, non-empty evidence, and source-record identity. There is no live AI provider.
 - The scheduler emits proposals only; there is no EventKit write implementation.
 - SQLite does not currently encrypt application data itself. Use only synthetic data until retention, deletion, and storage protections have been reviewed.
+
+
+## Microsoft Outlook safeguards (2026-10-19)
+
+- No real Microsoft login, Keychain access, mailbox read, send, or modification was performed during implementation. Tests inject fake credentials, mocked HTTP responses, temporary SQLite files, and synthetic PDF/DOCX documents.
+- The public-client OAuth flow uses S256 PKCE, random state, strict callback validation, exact Microsoft login endpoints, and User.Read/Mail.Read/offline_access scopes. The registered custom scheme is present in the packaged app's Info.plist. Token JSON goes only to per-account macOS login Keychain items; raw responses/errors and credentials are never logged or included in SQLite.
+- Graph traffic is GET-only, bound to HTTPS graph.microsoft.com and the expected `/me` collection. Redirects, cookies, and caches are disabled. Responses, pages, message counts, retries, and attachment expansion are bounded. Profile identity is verified before an Inbox cursor is used. Sync failures do not advance checkpoints; deleted emails do not delete approved commitments.
+- PDFKit is used for text extraction only; no document actions are invoked. DOCX decompression and XML parsing occur in memory, with CRC checking, no filesystem extraction, no external entities, and macro/embedding/external-relationship rejection. Unsupported/encrypted/scanned documents may be skipped with a notice. PDFKit page parsing cannot be preempted mid-call; this remains a hardening limitation.
+- Shared sender/keyword rules filter relevance before attachment retrieval. Review excerpts and provenance are persisted locally; full email bodies and original attachment files are not. Cloud transmission is blocked by the analysis boundary. Sync cursors are opaque synchronization state, not bearer credentials, and are not logged.
+- Multi-selection approval/rejection is a local transaction with an audit entry per decision. No unapproved proposal reaches the Timeline or scheduler. Cancellation/rescheduling requires human follow-up and never silently changes a protected event. Disconnect removes only the selected account's credential and preserves imported data and local completion choices.

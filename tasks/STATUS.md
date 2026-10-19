@@ -2,9 +2,51 @@
 
 Updated: 2026-10-19 (Europe/London)
 
-Current position: **M0–M1 complete; Canvas polling sync, calendar UI, deterministic assignment planning, and local assignment completion tracking are implemented and verified with fixtures. M2–M5 remain partial overall.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
+Current position: **M0–M1 complete; Canvas sync, local completion tracking, demo/live separation, and Microsoft Outlook integration are implemented and verified with fixtures. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
 
-## Latest task — separate Canvas data and Demo Mode (2026-10-19)
+## Latest milestone task — Microsoft Outlook integration (2026-10-19)
+
+### Implemented features
+
+- Multiple independent Microsoft accounts: public-client authorization code + S256 PKCE, random state, strict callback validation, common authority for organisational/personal accounts, browser account selection, and Graph profile identity checks. No passwords or client secrets are accepted. Tokens use account-specific macOS login Keychain items and refresh rotation; account metadata and opaque sync cursors use local SQLite.
+- Connections supports client-ID configuration, Add account, per-account Test connection, Synchronise now, last successful sync, account-specific errors, and Disconnect. Disconnect removes that account's credential and stops polling while preserving cached data and local completion statuses. The app bundle registers the Microsoft callback URL scheme.
+- Read-only Inbox sync initially covers the last 30 days. It handles pagination, per-account delta checkpoints, immutable message IDs, repeat-sync deduplication, partial-message hydration, removed/moved messages, HTTP 410 checkpoint reset, transient failures, 401 refresh, 429/5xx retries, and bounded Retry-After delays. Credentials are sent only to the fixed Microsoft/Graph HTTPS endpoints; Graph requests are GET only. Cross-origin/collection links and redirects are blocked.
+- Optional polling (5–1440 minutes, off by default) uses persisted settings while the app is running in Live data mode. Operations are shared across windows to prevent overlapping account refresh/sync actions. A future notification trigger can call the same sync boundary; no webhook service or subscription exists.
+- Both accounts share configurable keywords, exact-sender/domain allowlists, attachment privacy settings, and timezone. A provider-independent interface has a working local deterministic implementation for tutorials, meetings, appointments, deadlines, tasks, cancellations, and rescheduling notices. Explicit dates are extracted with evidence and confidence; ambiguous dates require manual review. Off-device providers are blocked, so no email is transmitted to cloud AI.
+- Relevant PDF/DOCX attachments are analyzed automatically within size/count/page/expansion/text limits. PDFKit extracts text only. DOCX parsing is in memory with bounded ZIP decompression, CRC validation, disabled XML external entities, and rejection of macro/embedded/external content. Attachment skips are reported. Full email bodies and original attachment files are not persisted; review excerpts, hashes, source references, and decisions are.
+- Review Inbox supports multi-selection approval/rejection, date/duration correction, account and email/attachment references, original-email links, confidence, duplicate hints, and conflicting dates/overlaps. Batch decisions commit atomically with audit entries. Approved dated events enter the local Timeline and planning constraints; unapproved proposals never do. Exact title/kind/start/duration duplicates merge source references. Cancellation/reschedule approval records an advisory review without changing protected commitments.
+- Live data now includes Canvas and approved Outlook events; Demo Mode remains isolated. Existing Canvas sources and completion choices are preserved. No destructive schema migration was needed: Outlook state uses a namespaced row in the existing `app_settings` table.
+
+### Tests and build results
+
+- Debug: **83 tests passed, 0 failures**. Release: **83 tests passed, 0 failures**. This adds 31 Outlook/analysis/attachment tests to the prior 52-test suite.
+- New coverage: PKCE test vector and random state, malformed callbacks, OAuth exchange and per-account refresh rotation, revoked refresh, cached token reuse, initial date filter, pagination, delta refresh/reset, account identity mismatch, duplicate message IDs across accounts, bounded throttling/network errors, unsafe links, partial-message hydration, changed/deleted source preservation, cloud-provider rejection, shared rules, timezone parsing, untrusted HTML, PDF and stored/deflated DOCX extraction, unsafe/macro/external/bomb/corrupt files, attachment privacy opt-out, conflict detection, batch rollback/approval, SQLite reopen, polling, Canvas progress preservation, user-corrected date/duration preservation across unchanged-source metadata updates, and invalid XML encoding rejection.
+- A synthetic DOCX test-builder expression initially exceeded Swift's type-checking limit; splitting it into small statements resolved the compiler error. Subsequent debug/release runs passed.
+- Sandbox restrictions blocked Swift package manifest loading; approved execution outside the sandbox was used for builds/tests. One approval-service usage-limit failure executed nothing; the user requested a retry and subsequent approval succeeded.
+- Final release application packaging succeeded. Ad-hoc signing, `codesign --verify --deep --strict`, and `plutil -lint` passed. Latest runnable app: [`build-output/AcademicTimeManager.app`](/Users/davidzhu/Desktop/academic-time-manager/build-output/AcademicTimeManager.app). The app was not launched, and real Microsoft authentication, Keychain access, Canvas/Outlook reads, mailbox changes, or calendar writes were not performed.
+
+### Files created or changed
+
+- New core: `MicrosoftAuth.swift`, `MicrosoftGraph.swift`, `OutlookModels.swift`, `EmailAnalysis.swift`, `AttachmentExtraction.swift`, and `EmailReviewRules.swift` in `Sources/AcademicCore/`.
+- New UI: `Sources/AcademicTimeManager/OutlookUI.swift`.
+- New system module: `Sources/CZlib/shim.h` and `module.modulemap`; uses macOS's existing zlib, with no downloaded dependencies.
+- New tests: `Tests/AcademicTimeManagerTests/OutlookIntegrationTests.swift` and `EmailAnalysisAttachmentTests.swift`.
+- Updated: `Package.swift`, `Sources/AcademicCore/Database.swift`, `AcademicDataset.swift`, `Sources/AcademicTimeManager/App.swift`, and `scripts/package-macos.sh`.
+- Documentation: new `docs/MICROSOFT_SETUP.md`; updated README, architecture, security, integrations, data model, roadmap, backlog, and this report.
+
+### Remaining limitations and user steps
+
+1. Register an Entra **Mobile and desktop** public client supporting **any organisational directory and personal Microsoft accounts**, with redirect `msauth.org.example.AcademicTimeManager://auth`. Configure delegated **User.Read**, **Mail.Read**, and **offline_access** consent; no client secret is needed. Oxford may require administrator approval. Do not bypass university policies.
+2. Review [Microsoft setup](../docs/MICROSOFT_SETUP.md), then open the rebuilt app, enter the client ID, save settings, and add each account interactively. Verify identities before using each account's Synchronise now. No credentials should be sent to Codex.
+3. Inspect extracted proposals and manual date/duration edits before batch approval. Verify restart persistence and duplicate handling, then optionally enable polling. The browser callback, actual tenant consent, Keychain prompts, and UI have not been live-tested.
+4. Current sync is Inbox-only. Initial filtered batches reaching 5,000 distinct changes, 200 pages, or 30 MB stop without committing a checkpoint. High-volume Inboxes need a future broader paging/window strategy. Polling needs an open app; no push notifications or sleep wakeups are implemented.
+5. The local extractor is conservative, not a general language model. Relative dates, complex prose, date ranges, recurrence, and quoted-thread semantics can require manual correction. Legacy DOC, DOCM, image-only/encrypted PDF, embedded/reference attachments, and DOCX external relationships are unsupported. PDFKit has a checked between-page time budget, not hard preemption of an individual parser call.
+6. Cancellation/rescheduling notices do not yet have an explicit target-event edit workflow; they remain reviewable advisories. No Apple Calendar publication is implemented. Exact duplicate matching is deterministic and does not establish semantic equivalence.
+7. SQLite metadata/review excerpts are not encrypted by the app. Full retention/deletion controls, indexed mail-history tables, distribution signing/notarization, and live UI/security smoke testing remain hardening work. A final check found a local Git repository on `main` with no remote. Changes remain uncommitted; no remote operation was performed.
+
+Development stops here before real Microsoft authentication, pending the user's review and interactive setup.
+
+## Previous task — separate Canvas data and Demo Mode (2026-10-19)
 
 ### Delivered behavior
 
@@ -84,8 +126,8 @@ A related availability bug constructed a reversed date interval when today's stu
 |---|---|---|
 | M0 — Architecture and scaffolding | Complete | Weighted stack decision, native Swift app shell, project setup, feasibility review. |
 | M1 — Local app and canonical model | Complete | SQLite persistence, provenance, demo timeline, review decisions, availability settings. |
-| M2 — Account integrations | Partial | Oxford Canvas read-only sync is implemented and mock-tested. Microsoft Graph is not implemented. EventKit is not implemented; no real account or permission prompt was used. |
-| M3 — Academic intelligence | Partial | Provider-independent analysis protocol and validation exist. Editable effort estimates and deterministic assignment stages are available; no inference provider or email extraction is active. |
+| M2 — Account integrations | Partial | Oxford Canvas read-only sync is implemented and mock-tested. Microsoft Graph multi-account PKCE/Inbox delta/local analysis/batch review is implemented with mocks; real login awaits user setup. EventKit is not implemented; no real account or permission prompt was used. |
+| M3 — Academic intelligence | Partial | Provider-independent interfaces and validation exist. Local email/attachment extraction, editable estimates, and deterministic stages are implemented; no cloud/general-language inference provider is active. |
 | M4 — Scheduling and calendar | Partial | Day/week/month calendar UI and deterministic local proposals are implemented. No EventKit publication, approval workflow, undo, or audit-linked scheduling is wired. |
 | M5 — Hardening and packaging | Partial | Debug/release suites pass; local ad-hoc-signed app bundle builds. No notarization, Developer ID signing, or in-app visual smoke test. |
 
@@ -133,19 +175,19 @@ The implementation performs an idempotent local merge using stable provider/exte
 - Canvas sync is polling/upsert, not server-side delta sync. It refreshes a 30-day-past/365-day-future calendar range, so older/far-future events outside that range are not retrieved. The importer preserves previously imported rows; it does not reconcile remote deletions.
 - The user's supplied screenshot shows a successful user-initiated Oxford Canvas sync. No live account verification or sync was performed by the development agent. Permission scopes and token policy remain user/institution choices.
 - No visual UI check was performed in a launched app. Confirm the new calendar layouts at normal/full-screen sizes and inspect the Connections scroll behavior manually.
-- Microsoft Graph needs an app registration/client ID, redirect URI registration, and tenant consent decision. No OAuth flow, mail retrieval, classification, or review import was implemented.
+- Microsoft Graph needs user-supplied app registration/client ID, registered redirect URI, tenant consent where required, and interactive login verification. OAuth, read-only mail sync, local classification/attachment extraction, and batch review are implemented and mock-tested.
 - EventKit permission handling, calendar discovery, managed-calendar setup, preview/approval, and duplicate-safe writes remain unimplemented. No permission was requested and no calendar was changed.
-- AI inference remains fixture-only. Estimates in the new plan UI are user-editable assumptions; automatic effort estimation and email date extraction are not implemented.
+- General-language AI inference remains unavailable. Email date extraction is deterministic and conservative; automatic effort estimation remains unimplemented.
 - Plan proposals are not persisted or approval/audit-linked. Calendar publication and undo are absent.
 - SQLite application data is not encrypted at the application layer; retention and user deletion controls remain future hardening work.
-- No Git metadata/remote exists in this workspace; changes are uncommitted and cannot be reported as a commit.
+- A local Git repository is now available on `main`, with no configured remote. Current changes are uncommitted; no push or merge was performed.
 
 ## Next priorities
 
 1. User opens the rebuilt app and verifies completion/reopening and restart persistence using the steps above; optionally initiates a sync to verify preservation and submission suggestions. No token needs to be sent to Codex.
 2. Add fixture coverage for calendar batches beyond ten course contexts and explicit SQLite rollback on commit failure; consider a documented reconciliation policy for remotely changed/deleted items.
 3. Decide whether the app needs a documented server-side delta mechanism or if periodic paginated refresh is acceptable for Canvas; widen or configure the event date window if required.
-4. Obtain the Microsoft public-client registration details and agreed delegated scopes before implementing the OAuth PKCE UI and mock-only Graph mail import. Keep real login disabled until user initiated.
+4. User registers the Microsoft public client, confirms delegated scopes/consent, and interactively verifies both accounts with the new setup guide. Do not initiate real login on the user's behalf.
 5. Implement and mock-test EventKit authorization, read-only event discovery, a dedicated managed calendar, preview/approval, and stable duplicate-safe updates. Do not request permission or write events until the user initiates.
 6. Persist user effort estimates/proposals and connect approvals/audit to the plan. Keep AI inference behind the existing provider interface and require review for uncertain extracted deadlines.
 7. Perform a user-led visual smoke test, then address code signing/notarization and local data retention/deletion before distribution.

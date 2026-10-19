@@ -35,6 +35,9 @@ cat > "$CONTENTS_PATH/Info.plist" <<'PLIST'
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
     <key>CFBundleVersion</key><string>1</string>
+    <key>CFBundleURLTypes</key>
+    <array><dict><key>CFBundleURLName</key><string>Microsoft OAuth callback</string>
+    <key>CFBundleURLSchemes</key><array><string>msauth.org.example.AcademicTimeManager</string></array></dict></array>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
 </dict>
 </plist>

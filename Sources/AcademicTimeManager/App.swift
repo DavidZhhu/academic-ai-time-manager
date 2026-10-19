@@ -5,9 +5,10 @@ import Foundation
 @main
 struct AcademicTimeManagerApp: App {
     @State private var model = PlannerViewModel()
+    @State private var outlook = OutlookViewModel()
     var body: some Scene {
         WindowGroup {
-            ContentView(model: model)
+            ContentView(model: model, outlook: outlook)
                 .frame(minWidth: 820, minHeight: 620)
         }
         .windowStyle(.hiddenTitleBar)
@@ -90,6 +91,14 @@ final class PlannerViewModel {
         }
     }
 
+    func reloadImportedData() {
+        guard let database else { return }
+        do {
+            items = try database.items(); sourceRecords = try database.sourceRecords()
+            planResult = nil
+        } catch { message = "Could not reload imported data from local storage." }
+    }
+
     func generatePlan(estimates: [String: Int] = [:], priorities: [String: Int] = [:]) {
         planResult = dataset.makePlan(progress: assignmentProgress,
             availability: availability, estimates: estimates, priorities: priorities, now: Date())
@@ -145,6 +154,7 @@ final class PlannerViewModel {
 
 struct ContentView: View {
     @Bindable var model: PlannerViewModel
+    @Bindable var outlook: OutlookViewModel
     @State private var selected = "Timeline"
     @State private var calendarMode: CalendarMode = .week
     @State private var selectedDate = Date()
@@ -182,11 +192,19 @@ struct ContentView: View {
             ToolbarItem(placement: .primaryAction) {
                 Button { model.synchronizeCanvas() } label: {
                     if model.isSyncingCanvas { Label("Syncing…", systemImage: "arrow.triangle.2.circlepath") }
-                    else { Label("Sync", systemImage: "arrow.clockwise") }
+                    else { Label("Sync Canvas", systemImage: "arrow.clockwise") }
                 }.disabled(model.isSyncingCanvas || model.database == nil || model.dataMode == .demo)
             }
             if model.isSyncingCanvas { ToolbarItem(placement: .status) { ProgressView().controlSize(.small).help("Reading Canvas data") } }
             if model.canvasSyncHasError { ToolbarItem(placement: .status) { Label("Sync failed", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).help(model.message) } }
+        }
+        .task(id: model.dataMode) {
+            outlook.attach(model.database)
+            guard model.dataMode == .live else { return }
+            while !Task.isCancelled {
+                if await outlook.poll() { model.reloadImportedData() }
+                do { try await Task.sleep(for: .seconds(60)) } catch { return }
+            }
         }
         .onChange(of: canvasConnection.isConnected) { _, connected in
             if connected { model.dataMode = .live }
@@ -198,10 +216,10 @@ struct ContentView: View {
             Picker("Data mode", selection: $model.dataMode) {
                 ForEach(StudyDataMode.allCases, id: \.self) { Text($0.label).tag($0) }
             }.pickerStyle(.segmented).frame(maxWidth: 360)
-                .disabled(model.isSyncingCanvas)
+                .disabled(model.isSyncingCanvas || outlook.busy)
             Text(model.dataMode == .demo
-                 ? "Demo Mode · Sample assignments and events only. Switch to Canvas data to plan your academic work."
-                 : "Canvas data · Demonstration assignments and events are excluded from this calendar and study planning.")
+                 ? "Demo Mode · Sample assignments and events only. Switch to Live data to plan your academic work."
+                 : "Live data · Demonstration assignments and events are excluded from this calendar and study planning.")
                 .font(.callout).foregroundStyle(model.dataMode == .demo ? .orange : .secondary)
         }
     }
@@ -210,7 +228,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top) {
                 heading(model.dataMode == .demo ? "Demonstration calendar" : "Academic calendar",
-                        subtitle: model.dataMode == .demo ? "Sample events for exploring the app" : "Your imported Oxford Canvas events")
+                        subtitle: model.dataMode == .demo ? "Sample events for exploring the app" : "Canvas events and approved Outlook commitments")
                 Spacer()
                 Picker("Calendar view", selection: $calendarMode) {
                     ForEach(CalendarMode.allCases) { mode in Text(mode.label).tag(mode) }
@@ -336,6 +354,7 @@ struct ContentView: View {
             ForEach(events) { item in
                 let providers = item.sourceRecordIDs.map(model.sourceName(for:))
                 let isCanvasImport = providers.contains("Canvas")
+                let isOutlookImport = providers.contains("Outlook")
                 HStack(alignment: .top, spacing: 14) {
                     VStack(alignment: .trailing, spacing: 4) {
                         Text(item.startsAt.formatted(date: .omitted, time: .shortened)).font(.headline)
@@ -352,7 +371,7 @@ struct ContentView: View {
                                 .font(.caption).foregroundStyle(.secondary)
                         }
                         Text("\(item.kind.label) · \(item.verification.rawValue.capitalized) · \(item.timeZoneIdentifier)").font(.subheadline).foregroundStyle(.secondary)
-                        Label(isCanvasImport ? "Imported from Oxford Canvas" : "Demonstration data", systemImage: isCanvasImport ? "arrow.down.doc" : "sparkles")
+                        Label(isCanvasImport ? "Imported from Oxford Canvas" : isOutlookImport ? "Approved from Outlook email" : "Demonstration data", systemImage: isCanvasImport ? "arrow.down.doc" : "sparkles")
                             .font(.caption).foregroundStyle(isCanvasImport ? .blue : .secondary)
                         DisclosureGroup("Event details and source") {
                             VStack(alignment: .leading, spacing: 4) {
@@ -361,7 +380,7 @@ struct ContentView: View {
                                 Text("Time zone: \(item.timeZoneIdentifier)")
                                 if let record = item.sourceRecordIDs.first.flatMap({ sourceID in model.sourceRecords.first(where: { $0.id == sourceID }) }),
                                    let uri = record.sourceURI, let url = URL(string: uri) {
-                                    Link("Open Canvas source", destination: url).padding(.top, 3)
+                                    Link("Open source", destination: url).padding(.top, 3)
                                 }
                             }.font(.caption).foregroundStyle(.secondary).padding(.top, 5)
                         }.font(.caption)
@@ -497,6 +516,7 @@ struct ContentView: View {
     private var reviewView: some View {
         VStack(alignment: .leading, spacing: 18) {
             heading("Review inbox", subtitle: "Tentative items stay separate until you decide")
+            if model.dataMode == .live { OutlookReviewView(model: outlook, changed: model.reloadImportedData) }
             if model.dataset.reviews.isEmpty && !model.dataset.conflicts.contains(where: { $0.state == .unresolved }) {
                 Text("No items to review in this data mode.").foregroundStyle(.secondary)
             }
@@ -549,7 +569,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 16) {
             heading("Connections", subtitle: "Connect Oxford Canvas with a read-only API token")
             canvasConnectionView
-            connection("Microsoft 365", detail: "Not connected · no mailbox data accessed", icon: "envelope")
+            OutlookConnectionsView(model: outlook, isDemo: model.dataMode == .demo, changed: model.reloadImportedData)
             connection("Apple Calendar", detail: "Not connected · EventKit permission not requested", icon: "calendar")
             Spacer()
         }

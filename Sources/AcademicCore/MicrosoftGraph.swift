@@ -52,17 +52,18 @@ public struct MicrosoftGraphClient: Sendable {
     public static func safeURL(_ string: String, path: String? = nil) throws -> URL {
         guard let url = URL(string: string), url.scheme == "https", url.host == "graph.microsoft.com",
               url.port == nil || url.port == 443, url.user == nil, url.password == nil, url.fragment == nil,
-              url.path.hasPrefix("/v1.0/me"), path == nil || url.path == path else { throw OutlookError.unsafeLink }
+              (url.path == "/v1.0/me" || url.path.hasPrefix("/v1.0/me/")), path == nil || url.path == path else { throw OutlookError.unsafeLink }
         return url
     }
     static func component(_ value: String) -> String { value.addingPercentEncoding(withAllowedCharacters: .alphanumerics)! }
     func get(_ url: URL) async throws -> Data {
         _ = try Self.safeURL(url.absoluteString)
-        var refreshed = false; var attempts = 0
+        var refreshed = false; var forceNextRefresh = false; var attempts = 0
         while true {
             try Task.checkCancellation()
             var request = URLRequest(url: url); request.httpMethod = "GET"
-            request.setValue("Bearer \(try await token(refreshed))", forHTTPHeaderField: "Authorization")
+            request.setValue("Bearer \(try await token(forceNextRefresh))", forHTTPHeaderField: "Authorization")
+            forceNextRefresh = false
             request.setValue("IdType=\"ImmutableId\", outlook.body-content-type=\"text\", odata.maxpagesize=50", forHTTPHeaderField: "Prefer")
             request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
             let data: Data; let response: HTTPURLResponse
@@ -75,13 +76,16 @@ public struct MicrosoftGraphClient: Sendable {
             }
             if response.statusCode == 401 {
                 guard !refreshed else { throw OutlookError.reconnect }
-                refreshed = true; continue
+                refreshed = true; forceNextRefresh = true; continue
             }
             if response.statusCode == 403 { throw OutlookError.permission }
             if response.statusCode == 429 || (500...599).contains(response.statusCode) {
                 guard attempts < 2 else { throw OutlookError.http(response.statusCode) }
                 attempts += 1
-                let delay = response.value(forHTTPHeaderField: "Retry-After").flatMap(Double.init) ?? TimeInterval(attempts * 2)
+                let header = response.value(forHTTPHeaderField: "Retry-After")
+                let formatter = DateFormatter(); formatter.locale = Locale(identifier: "en_US_POSIX")
+                formatter.timeZone = TimeZone(secondsFromGMT: 0); formatter.dateFormat = "EEE, dd MMM yyyy HH:mm:ss z"
+                let delay = header.flatMap(Double.init) ?? header.flatMap { formatter.date(from: $0)?.timeIntervalSinceNow } ?? TimeInterval(attempts * 2)
                 // Never retry earlier than a long server-requested delay; let the next poll retry.
                 guard delay <= 60 else { throw OutlookError.http(response.statusCode) }
                 try await sleep(max(1, delay)); continue
@@ -102,7 +106,9 @@ public struct MicrosoftGraphClient: Sendable {
         guard !provider.transmitsOffDevice else { throw OutlookError.permission }
         // Check the credential's subject before importing into an account's namespace.
         guard try await profile().id == account.profileID else { throw OutlookError.reconnect }
-        do { return try await readDelta(account: account, previous: previous, now: now, provider: provider, extractor: extractor) }
+        var initial = account
+        if initial.deltaLink == nil { initial.initialSince = now.addingTimeInterval(-30 * 86400) }
+        do { return try await readDelta(account: initial, previous: previous, now: now, provider: provider, extractor: extractor) }
         catch OutlookError.http(410) {
             var reset = account; reset.deltaLink = nil; reset.initialSince = now.addingTimeInterval(-30 * 86400)
             var batch = try await readDelta(account: reset, previous: previous, now: now, provider: provider, extractor: extractor)
@@ -125,7 +131,7 @@ public struct MicrosoftGraphClient: Sendable {
             guard totalBytes <= 30_000_000 else { throw OutlookError.limit }
             guard let page = try? JSONDecoder().decode(GraphPage<GraphMessage>.self, from: data) else { throw OutlookError.invalidResponse }
             for message in page.value { messages[message.id] = message }
-            guard messages.count <= 5000 else { throw OutlookError.limit }
+            guard messages.count < 5000 else { throw OutlookError.limit }
             if let next = page.next { url = try Self.safeURL(next, path: path) }
             else {
                 guard let delta = page.delta else { throw OutlookError.invalidResponse }
@@ -153,13 +159,13 @@ public struct MicrosoftGraphClient: Sendable {
             guard received >= account.initialSince else { continue }
             let subject = complete.subject ?? "Email commitment"
             let text = LocalEmailAnalysisProvider.plainText(body.content, isHTML: body.contentType.lowercased() == "html")
-            let revision = outlookDigest(subject + text + (complete.lastModifiedDateTime ?? "") + String(previous.settings.analyzeAttachments) + previous.settings.keywords + previous.settings.allowedSenders + previous.settings.timeZoneIdentifier)
+            let revision = outlookDigest(subject + text + String(complete.hasAttachments ?? false) + (complete.lastModifiedDateTime ?? "") + String(previous.settings.analyzeAttachments) + previous.settings.keywords + previous.settings.allowedSenders + previous.settings.timeZoneIdentifier)
             if previous.messages[sourceID]?.revision == revision { continue }
             batch.messages[sourceID] = OutlookMessageRecord(accountID: account.id, messageID: message.id, revision: revision)
             let sender = complete.from?.emailAddress?.address ?? ""
             guard previous.settings.isRelevant(subject: subject, text: text, sender: sender) else { continue }
             let webLink = complete.webLink.flatMap { URL(string: $0) }.flatMap { url -> String? in
-                guard url.scheme == "https", ["outlook.office.com", "outlook.office365.com", "outlook.live.com"].contains(url.host ?? "") else { return nil }
+                guard url.scheme == "https", url.user == nil, url.password == nil, url.port == nil || url.port == 443, ["outlook.office.com", "outlook.office365.com", "outlook.live.com"].contains(url.host ?? "") else { return nil }
                 return url.absoluteString
             }
             batch.sources.append(SourceRecord(id: sourceID, provider: "Outlook", externalID: account.id + ":" + message.id,

@@ -142,6 +142,86 @@ public final class LocalDatabase {
         return Dictionary(uniqueKeysWithValues: values.map { ($0.assignmentID, $0) })
     }
 
+    public func outlookState() throws -> OutlookState {
+        try readJSON("SELECT payload_json FROM app_settings WHERE key = 'outlook_state';").first ?? OutlookState()
+    }
+
+    public func save(_ state: OutlookState) throws {
+        let json = try encoded(state)
+        try withStatement("INSERT INTO app_settings(key, payload_json) VALUES ('outlook_state', ?) ON CONFLICT(key) DO UPDATE SET payload_json=excluded.payload_json;") { bind(json, to: 1, in: $0) }
+    }
+
+    /// Checkpoint, message revisions, source provenance and review changes commit atomically.
+    public func importOutlook(_ batch: OutlookSyncBatch) throws {
+        try execute("BEGIN IMMEDIATE;")
+        do {
+            var state = try outlookState()
+            guard let index = state.accounts.firstIndex(where: { $0.id == batch.account.id && $0.connected }) else { throw OutlookError.reconnect }
+            state.accounts[index] = batch.account
+            let updatedMessages = Set(batch.messages.values.map(\.messageID))
+            let incomingIDs = Set(batch.proposals.map(\.id))
+            for i in state.proposals.indices where state.proposals[i].accountID == batch.account.id {
+                let old = state.proposals[i]
+                if batch.removedMessageIDs.contains(old.messageID) || (updatedMessages.contains(old.messageID) && !incomingIDs.contains(old.id)) {
+                    state.proposals[i].withdrawn = true
+                    state.proposals[i].note = "Source email was changed, moved, or removed. Previously approved commitments are preserved; check them manually."
+                }
+            }
+            for proposal in batch.proposals {
+                if let i = state.proposals.firstIndex(where: { $0.id == proposal.id }) {
+                    // The ID hashes the extracted source facts, not user-edited dates/durations.
+                    // Re-fetching unchanged evidence must preserve local corrections and decisions.
+                    if state.proposals[i].withdrawn { state.proposals[i].note = proposal.note }
+                    state.proposals[i].withdrawn = false
+                } else { state.proposals.append(proposal) }
+            }
+            state.messages.merge(batch.messages) { _, new in new }
+            for source in batch.sources { try save(source) }
+            state.proposals = EmailReviewRules.annotated(state.proposals, existing: AcademicDataset(items: try items(), sources: try sourceRecords()).items)
+            try save(state)
+            try execute("COMMIT;")
+        } catch { try? execute("ROLLBACK;"); throw error }
+    }
+
+    /// One transaction for the entire batch; never invokes a mailbox or calendar API.
+    public func decideOutlook(ids: Set<String>, decision: ReviewDecision) throws {
+        try execute("BEGIN IMMEDIATE;")
+        do {
+            var state = try outlookState()
+            let selected = state.proposals.filter { ids.contains($0.id) }
+            guard !ids.isEmpty, selected.count == ids.count else { throw OutlookError.review }
+            if decision == .accepted && selected.contains(where: { !$0.canApprove }) { throw OutlookError.review }
+            var events = AcademicDataset(items: try items(), sources: try sourceRecords()).items
+            for i in state.proposals.indices where ids.contains(state.proposals[i].id) {
+                var proposal = state.proposals[i]
+                // Rejecting a previously accepted event does not silently delete its protected commitment.
+                guard proposal.decision == .pending else { throw OutlookError.review }
+                proposal.decision = decision
+                if decision == .accepted, !proposal.kind.advisory, let date = proposal.date {
+                    let kind: AcademicItemKind = proposal.kind == .tutorial ? .tutorial : (proposal.kind == .deadline || proposal.kind == .task) ? .deadline : .classSession
+                    let expectedEnd = kind == .deadline ? date : date.addingTimeInterval(TimeInterval(proposal.durationMinutes * 60))
+                    let matching = events.firstIndex { $0.title.lowercased() == proposal.title.lowercased() && $0.kind == kind && $0.startsAt == date && $0.endsAt == expectedEnd }
+                    if let matching {
+                        if !events[matching].sourceRecordIDs.contains(proposal.sourceID) { events[matching].sourceRecordIDs.append(proposal.sourceID) }
+                        try save(events[matching])
+                    } else {
+                        let event = AcademicItem(id: "outlook-event-" + proposal.fingerprint, title: proposal.title,
+                            startsAt: date, endsAt: kind == .deadline ? date : date.addingTimeInterval(TimeInterval(proposal.durationMinutes * 60)),
+                            timeZoneIdentifier: state.settings.timeZoneIdentifier, kind: kind, verification: .verified,
+                            sourceRecordIDs: [proposal.sourceID], isProtected: true)
+                        try save(event); events.append(event)
+                    }
+                }
+                state.proposals[i] = proposal
+                try append(AuditEntry(id: UUID().uuidString, actor: "user", action: "email-review-" + decision.rawValue,
+                    targetID: proposal.id, beforeReference: "pending", afterReference: decision.rawValue, timestamp: Date()))
+            }
+            state.proposals = EmailReviewRules.annotated(state.proposals, existing: events)
+            try save(state)
+            try execute("COMMIT;")
+        } catch { try? execute("ROLLBACK;"); throw error }
+    }
+
     private func encoded<T: Encodable>(_ value: T) throws -> String {
         String(decoding: try encoder.encode(value), as: UTF8.self)
     }

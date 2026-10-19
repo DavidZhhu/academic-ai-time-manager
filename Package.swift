@@ -10,6 +10,6 @@ let package = Package(
         .systemLibrary(name: "CZlib"),
         .target(name: "AcademicCore", dependencies: ["CSQLite", "CZlib"], path: "Sources/AcademicCore"),
         .executableTarget(name: "AcademicTimeManager", dependencies: ["AcademicCore"], resources: [.process("Resources")]),
-        .testTarget(name: "AcademicTimeManagerTests", dependencies: ["AcademicCore"])
+        .testTarget(name: "AcademicTimeManagerTests", dependencies: ["AcademicCore", "CZlib"])
     ]
 )

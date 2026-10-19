@@ -90,7 +90,7 @@ public struct EmailProposal: Codable, Sendable, Equatable, Identifiable {
     public var duplicateOf: String?
     public var conflictsWith: [String] = []
     public var fingerprint: String {
-        outlookDigest(kind.rawValue + ":" + title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) + ":" + String(date?.timeIntervalSince1970 ?? -1))
+        outlookDigest(kind.rawValue + ":" + title.lowercased().trimmingCharacters(in: .whitespacesAndNewlines) + ":" + String(date?.timeIntervalSince1970 ?? -1) + ":" + String(durationMinutes))
     }
     public var canApprove: Bool { !withdrawn && (kind.advisory || date != nil) && (0...1440).contains(durationMinutes) }
 }

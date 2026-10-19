@@ -23,11 +23,17 @@ A user can securely connect accounts, see imported academic events and deadlines
 
 In the running app, open **Connections**, paste your Canvas API token into the **Canvas API token** secure field, and select **Save token and test connection**. The app stores the token in macOS Keychain and checks it with a read-only request to Oxford Canvas. You can test a saved token again or remove it from Keychain in the same screen. Removing it from this app does not revoke the token in Canvas.
 
-## Canvas data and Demo Mode
+## Live data and Demo Mode
 
-The app opens in **Canvas data** mode, showing only cached Oxford Canvas assignments and events. Select **Demo Mode** using the data-mode control at the top of the page to explore the preserved samples. Timeline, Plan Preview, and Review Inbox follow the same selection. Sample assignments never enter real study plans, and sample events never block real study time.
+The app opens in **Live data** mode, showing cached Oxford Canvas data and approved Outlook commitments. Select **Demo Mode** using the data-mode control at the top of the page to explore the preserved samples. Timeline, Plan Preview, and Review Inbox follow the same selection. Sample assignments never enter real study plans, and sample events never block real study time.
 
-Switching modes clears the current proposal without deleting records or changing completion status. Mode selection lasts for the current session; restarting returns to Canvas data. Sync is disabled in Demo Mode. An empty Canvas cache stays empty until you initiate a sync; it never falls back to sample assignments.
+Switching modes clears the current proposal without deleting records or changing completion status. Mode selection lasts for the current session; restarting returns to Live data. Sync is disabled in Demo Mode. An empty Canvas cache stays empty until you initiate a sync; it never falls back to sample assignments.
+
+## Connect Microsoft Outlook
+
+See [Microsoft setup](docs/MICROSOFT_SETUP.md) for the Entra registration and consent steps. In **Connections**, enter the non-secret client ID, save settings, and choose **Add Microsoft account** separately for Oxford and personal Outlook/Hotmail. Microsoft handles login in a browser; the application stores tokens in Keychain. Use each account's **Synchronise now** button, then review proposals in **Review inbox**. Polling is optional and off by default. No mailbox writes or Apple Calendar publication are performed.
+
+Both accounts use shared local classification rules. Relevant PDF/DOCX attachments are processed within safety limits. Uncertain dates need confirmation, and cancellation/rescheduling proposals remain advisory. No cloud AI transmission occurs.
 
 ## Track assignment progress
 
