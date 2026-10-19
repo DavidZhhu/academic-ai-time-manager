@@ -1,6 +1,6 @@
 import Foundation
 
-public enum UnifiedTimelineSource: String, Equatable, Sendable {
+public enum UnifiedTimelineSource: String, CaseIterable, Hashable, Sendable {
     case canvas, outlook, demonstration, appleCalendar, managedCalendar, unknown
 
     public var label: String {

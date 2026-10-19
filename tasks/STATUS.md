@@ -4,6 +4,56 @@ Updated: 2026-10-19 (Europe/London)
 
 Current position: **M0–M1 complete; Canvas sync, local completion tracking, demo/live separation, Microsoft Outlook integration, and unified Apple Calendar Timeline display are integrated on main and verified with fixtures. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
 
+## Latest task — calendar redesign Stage 1 (2026-10-19)
+
+Implemented on the explicitly requested `feature/calendar-redesign`, based on `main` at `de0a7c0`. Active branch and clean working tree were verified before edits. `main` remains at that commit; no other worktree was modified. This is one authorized interface milestone; M2–M5 and live MVP acceptance remain partial.
+
+### Delivered behavior
+
+- Three panels: existing navigation plus mini-calendar/source filters; Day/Week/Month calendar; resizable academic tasks with toolbar visibility toggle. Window-local date/view/filter/panel state survives navigation between app pages. Command-Left/Right changes range, Command-T returns to today, and Command-Option-Backslash toggles tasks. Narrow grids scroll horizontally; time headers remain above vertical scrolling.
+- Week has seven locale-ordered day columns and an hourly grid. Day provides the same grid at full width. Events use real start/duration coordinates, deterministic side-by-side overlap lanes, independently clipped overnight segments and a separate scrollable all-day band. Today and the current time are highlighted. DST days preserve elapsed durations and label repeated/skipped local hours explicitly.
+- Month is a complete calendar grid, including adjacent-month dates, compact events and overflow counts. Date buttons and overflow open Day. Clicking any event opens a scrollable, read-only inspector with original title, source, dates, source/display time zones, verification, protection and HTTP(S) source links.
+- Canvas blue, approved Outlook purple, Apple Calendar orange and owned study sessions green. Deadlines have flags and dashed borders. Demonstration records retain their label. Color is supplemented by text/icons, accessible labels and native keyboard-focusable controls.
+- Tasks reuse the same scoped assignments, saved completion status, and Plan preview effort/priority dictionaries. They show upcoming, overdue, undated and completed work. Available edited estimates/priorities appear without inventing AI estimates. Status changes call the existing persistence and plan/approval invalidation path.
+- Source filters change display only: hidden commitments still constrain planning. Live/Demo selection, Canvas sync, Outlook review, Apple Calendar permissions/privacy, protected events, study scheduling, approval, cancellation and undo retain their existing services. Personal Calendar titles remain verbatim in transient local display values. Selection stores only an ID and resolves against the current scoped dataset.
+
+### Files changed
+
+- New `Sources/AcademicCore/CalendarPresentation.swift`: window presentation state, calendar ranges, filtering and deterministic layout.
+- Updated `Sources/AcademicCore/UnifiedTimeline.swift`: iterable/hashable source values for filters.
+- Updated `Sources/AcademicTimeManager/App.swift`: panel composition, retained navigation state, toolbar toggle and shared visible-range refresh; removed the old card calendar and unused helpers. App.swift shrank by roughly 200 lines.
+- New `Sources/AcademicTimeManager/CalendarSidebar.swift`: source appearance, mini-calendar and filters.
+- New `Sources/AcademicTimeManager/CalendarWorkspace.swift`: date/view navigation, panel layout and inspector selection.
+- New `Sources/AcademicTimeManager/CalendarTimeGrid.swift`: Day/Week time grid, overlap lanes, all-day band and current-time marker.
+- New `Sources/AcademicTimeManager/CalendarMonthView.swift`: month cells, compact event indicators and Day navigation.
+- New `Sources/AcademicTimeManager/CalendarEventViews.swift`: event blocks and read-only details.
+- New `Sources/AcademicTimeManager/AcademicTaskPanel.swift`: existing assignment progress and optional estimates/priority.
+- New `Tests/AcademicTimeManagerTests/CalendarPresentationTests.swift`: 14 synthetic layout/filter/navigation tests.
+- Updated `README.md`, `docs/ARCHITECTURE.md`, and `tasks/STATUS.md`: usage, architecture and this report.
+- Rebuilt ignored artifact: `build-output/AcademicTimeManager.app`.
+
+### Verification
+
+- Full debug `swift test`: **132 passed, 0 failures** (118 existing + 14 new tests).
+- Full release `swift test -c release`: **132 passed, 0 failures**. These are local results, independent of GitHub Actions queue state.
+- New tests cover seven-day/locale ranges, full/leap-month rows, adjacent month/year navigation, retained presentation state, every source/empty filter, exclusive midnight boundaries, exact positions/durations, deterministic overlap clusters/lane reuse, all-day separation, multi-day clipping, deadline markers, UK spring/fall DST and live/demo isolation. Existing mocked connector, progress, scheduler, approval, cancellation, undo and privacy regression suites also pass.
+- Synthetic-only AppKit/SwiftUI render harness inspected production calendar components in Day, Week, Month, 820-point narrow and dark layouts. It uses a substitute in-memory model with synthetic events and never instantiates the production app model or account adapters. Rendering found a compressed picker label, which was fixed. This is visual layout inspection, not interactive application acceptance.
+- Release packaging through `scripts/package-macos.sh` succeeded. Existing Apple Development signing identity, `org.example.AcademicTimeManager`, TeamIdentifier and stable Apple-anchored designated requirement verified; strict/deep signature checks and plist lint passed. Executable is macOS arm64.
+- `git diff --check` passed. Swift compiler caches/macros and packaging required approved execution outside the sandbox. Logs: `/private/tmp/academic-calendar-debug.log`, `/private/tmp/academic-calendar-release.log`, `/private/tmp/academic-calendar-package.log`; synthetic render output under `/private/tmp/academic-calendar-preview/` (temporary, not committed).
+- No production app launch, real accounts, production SQLite, personal Calendar reads, EventKit store, permissions, application credentials, network sync, AI provider or Calendar writes were used during development. Packaging used the existing signing workflow only. No database/schema, entitlement, bundle identifier, credential naming or integration scope changes.
+
+### Manual checks, risks and Stage 2 gate
+
+1. Open the rebuilt app yourself and select Demo Mode. Verify Day/Week/Month, Previous/Next/Today, mini-calendar selection and month-to-Day navigation. Inspect a sample event, then switch app pages and return; date, view, filters and task-panel choice should remain.
+2. Resize from minimum window width to full screen. Resize/hide the task panel, scroll narrow weeks horizontally, and verify all-day overflow and both appearances. Dense/short event labels truncate; select or hover for full details.
+3. Use keyboard focus and the documented shortcuts; verify full event labels, source/verification and progress controls with VoiceOver. The isolated renderer does not test real focus, toolbar interaction, sheet dismissal or permission behavior. These remain user-led checks.
+4. Change a sample task's local completion status in either Tasks or Plan preview and verify both agree. Edit effort/priority in Plan preview and return to Tasks. Existing completion persistence remains covered by temporary-database tests; estimates and presentation state remain session-only.
+5. Real-account regression checks are optional user-led work under the existing integration checklists, using dedicated test calendars. No live verification is claimed. Display filters never authorize writes or remove hidden busy-time constraints.
+6. Stage 2 remains unimplemented: event creation, drag-and-drop, resizing and event-edit/write interactions need separately approved scope, protection rules, exact previews, reversible writes, accessibility and tests. Dense-event presentation can be refined after user feedback. Notarization/distribution and broader MVP hardening remain existing work.
+
+Git delivery: commit and push only `feature/calendar-redesign`, then open a **draft PR targeting main**. No merge, force-push or branch-protection changes. The final response supplies the commit and PR URL.
+
+**Approval requested:** review Stage 1 and the manual checks before approving Stage 2. Stop at this milestone as required by `AGENTS.md`; no next-stage approval is assumed.
 ## Latest task — GitHub Actions Swift generic-decoding compatibility (2026-10-19)
 
 ### Finding and change

@@ -174,39 +174,58 @@ struct ContentView: View {
     @Bindable var model: PlannerViewModel
     @Bindable var outlook: OutlookViewModel
     @State private var selected = "Timeline"
-    @State private var calendarMode: CalendarMode = .week
-    @State private var selectedDate = Date()
+    @State private var calendarState = CalendarPresentationState()
     @State private var assignmentEffort: [String: Int] = [:]
     @State private var assignmentPriority: [String: Int] = [:]
     @State private var canvasConnection = CanvasConnectionViewModel()
     private let sections = ["Timeline", "Plan preview", "Review inbox", "Availability", "Connections"]
     var body: some View {
         NavigationSplitView {
-            List(sections, id: \.self, selection: $selected) { section in
-                Label(section, systemImage: icon(for: section)).tag(section)
+            VStack(spacing: 0) {
+                List(sections, id: \.self, selection: $selected) { section in
+                    Label(section, systemImage: icon(for: section)).tag(section)
+                }.frame(minHeight: 180, idealHeight: 210, maxHeight: 230)
+                Divider()
+                ScrollView { CalendarSidebar(state: $calendarState) }
             }
             .navigationTitle("Academic Planner")
+            .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 280)
         } detail: {
-            ScrollView(.vertical) {
-                VStack(alignment: .leading, spacing: 20) {
-                    dataModeControls
-                    switch selected {
-                    case "Plan preview": planView
-                    case "Review inbox": reviewView
-                    case "Availability": availabilityView
-                    case "Connections": connectionsView
-                    default: timelineView
-                    }
+            VStack(alignment: .leading, spacing: 0) {
+                dataModeControls.padding(.horizontal, 20).padding(.vertical, 12)
+                Divider()
+                if selected == "Timeline" {
+                    CalendarWorkspace(model: model, state: $calendarState, effort: assignmentEffort, priority: assignmentPriority)
+                } else {
+                    ScrollView(.vertical) {
+                        VStack(alignment: .leading, spacing: 20) {
+                            switch selected {
+                            case "Plan preview": planView
+                            case "Review inbox": reviewView
+                            case "Availability": availabilityView
+                            default: connectionsView
+                            }
+                        }
+                        .padding(28)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    }.scrollIndicators(.automatic)
                 }
-                .padding(28)
-                .frame(maxWidth: .infinity, alignment: .topLeading)
             }
-            .scrollIndicators(.automatic)
             .safeAreaPadding(.top, 12)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
             .background(Color(nsColor: .windowBackgroundColor))
         }
         .toolbar {
+            if selected == "Timeline" {
+                ToolbarItem(placement: .primaryAction) {
+                    Button { calendarState.showsTasks.toggle() } label: {
+                        Label(calendarState.showsTasks ? "Hide academic tasks" : "Show academic tasks", systemImage: "sidebar.right")
+                    }
+                    .keyboardShortcut("\\", modifiers: [.command, .option])
+                    .help(calendarState.showsTasks ? "Hide academic tasks" : "Show academic tasks")
+                    .accessibilityValue(calendarState.showsTasks ? "Visible" : "Hidden")
+                }
+            }
             ToolbarItem(placement: .primaryAction) {
                 Button { model.synchronizeCanvas() } label: {
                     if model.isSyncingCanvas { Label("Syncing…", systemImage: "arrow.triangle.2.circlepath") }
@@ -224,6 +243,7 @@ struct ContentView: View {
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
             }
         }
+        .onChange(of: model.dataMode) { _, _ in refreshAppleCalendarTimeline() }
         .onChange(of: canvasConnection.isConnected) { _, connected in
             if connected { model.dataMode = .live }
         }
@@ -231,8 +251,9 @@ struct ContentView: View {
         .onChange(of: selected) { _, page in
             if page == "Timeline" { refreshAppleCalendarTimeline() }
         }
-        .onChange(of: selectedDate) { _, _ in refreshAppleCalendarTimeline() }
-        .onChange(of: calendarMode) { _, _ in refreshAppleCalendarTimeline() }
+        .onChange(of: CalendarPresentation.visibleInterval(date: calendarState.date, mode: calendarState.mode)) { _, _ in
+            refreshAppleCalendarTimeline()
+        }
     }
 
     private var dataModeControls: some View {
@@ -248,194 +269,10 @@ struct ContentView: View {
         }
     }
 
-    private var timelineView: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            HStack(alignment: .top) {
-                heading(model.dataMode == .demo ? "Demonstration calendar" : "Academic calendar",
-                        subtitle: model.dataMode == .demo ? "Sample events for exploring the app" : "Canvas, approved Outlook, and protected Apple Calendar commitments")
-                Spacer()
-                Picker("Calendar view", selection: $calendarMode) {
-                    ForEach(CalendarMode.allCases) { mode in Text(mode.label).tag(mode) }
-                }.pickerStyle(.segmented).frame(width: 240)
-            }
-            if model.dataMode == .live {
-                Label(model.message, systemImage: model.canvasSyncHasError ? "exclamationmark.triangle.fill" : "info.circle").font(.callout).foregroundStyle(model.canvasSyncHasError ? .orange : .secondary)
-                if model.isSyncingCanvas { ProgressView("Reading courses, assignments and calendar events from Oxford Canvas…").controlSize(.small) }
-                if let lastSync = model.lastSuccessfulCanvasSync {
-                    Label("Last successful Canvas sync: \(lastSync.formatted(date: .abbreviated, time: .shortened))", systemImage: "arrow.clockwise.circle")
-                        .font(.callout).foregroundStyle(.secondary)
-                }
-            }
-            calendarNavigation
-            switch calendarMode {
-            case .day: eventList(for: dayEvents())
-            case .week: eventList(for: weekEvents())
-            case .month: monthCalendar
-            }
-            Spacer()
-        }
-    }
-
-    private var calendarNavigation: some View {
-        HStack {
-            Button { moveCalendar(by: -1) } label: { Label("Previous", systemImage: "chevron.left") }
-                .labelStyle(.iconOnly).help("Previous \(calendarMode.label.lowercased())")
-            Button("Today") { selectedDate = Date() }
-            Button { moveCalendar(by: 1) } label: { Label("Next", systemImage: "chevron.right") }
-                .labelStyle(.iconOnly).help("Next \(calendarMode.label.lowercased())")
-            Text(calendarTitle).font(.title2.bold()).padding(.leading, 8)
-            Spacer()
-        }
-    }
-
-    private var calendarTitle: String {
-        switch calendarMode {
-        case .day: return selectedDate.formatted(date: .complete, time: .omitted)
-        case .week:
-            let range = weekRange()
-            return "\(range.start.formatted(date: .abbreviated, time: .omitted)) – \(range.end.addingTimeInterval(-1).formatted(date: .abbreviated, time: .omitted))"
-        case .month: return selectedDate.formatted(.dateTime.month(.wide).year())
-        }
-    }
-
-    private func moveCalendar(by amount: Int) {
-        let component: Calendar.Component = calendarMode == .day ? .day : calendarMode == .week ? .weekOfYear : .month
-        if let next = Calendar.current.date(byAdding: component, value: amount, to: selectedDate) { selectedDate = next }
-    }
-
-    private func dayEvents() -> [UnifiedTimelineEvent] {
-        let calendar = Calendar.current
-        guard let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: selectedDate)) else { return [] }
-        return timelineEvents(in: DateInterval(start: calendar.startOfDay(for: selectedDate), end: end))
-    }
-
-    private func weekRange() -> (start: Date, end: Date) {
-        let calendar = Calendar.current
-        let dayStart = calendar.startOfDay(for: selectedDate)
-        let weekday = calendar.component(.weekday, from: dayStart)
-        let offset = (weekday - calendar.firstWeekday + 7) % 7
-        let start = calendar.date(byAdding: .day, value: -offset, to: dayStart) ?? dayStart
-        let end = calendar.date(byAdding: .day, value: 7, to: start) ?? start
-        return (start, end)
-    }
-
-    private func weekEvents() -> [UnifiedTimelineEvent] {
-        let range = weekRange()
-        return timelineEvents(in: DateInterval(start: range.start, end: range.end))
-    }
-
-    private var monthCalendar: some View {
-        let calendar = Calendar.current
-        let components = calendar.dateComponents([.year, .month], from: selectedDate)
-        let monthStart = calendar.date(from: components) ?? selectedDate
-        let dayRange = calendar.range(of: .day, in: .month, for: monthStart) ?? 1..<2
-        let leading = (calendar.component(.weekday, from: monthStart) - calendar.firstWeekday + 7) % 7
-        let columns = Array(repeating: GridItem(.flexible(), spacing: 8), count: 7)
-        return VStack(alignment: .leading, spacing: 10) {
-            LazyVGrid(columns: columns, spacing: 8) {
-                ForEach(weekdaySymbols(), id: \.self) { Text($0).font(.caption.bold()).foregroundStyle(.secondary).frame(maxWidth: .infinity) }
-                ForEach(0..<leading, id: \.self) { _ in Color.clear.frame(height: 78) }
-                ForEach(dayRange, id: \.self) { number in
-                    if let date = calendar.date(byAdding: .day, value: number - 1, to: monthStart) {
-                        monthDay(date, number: number)
-                    }
-                }
-            }
-            if !dayEvents().isEmpty {
-                Text("Events on \(selectedDate.formatted(date: .complete, time: .omitted))").font(.title3.bold())
-                eventList(for: dayEvents())
-            }
-        }
-    }
-
-    private func weekdaySymbols() -> [String] {
-        let symbols = Calendar.current.veryShortStandaloneWeekdaySymbols
-        let first = max(0, min(symbols.count - 1, Calendar.current.firstWeekday - 1))
-        return Array(symbols[first...] + symbols[..<first])
-    }
-
-    private func monthDay(_ date: Date, number: Int) -> some View {
-        let start = Calendar.current.startOfDay(for: date)
-        let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start
-        let events = timelineEvents(in: DateInterval(start: start, end: end))
-        return Button { selectedDate = date } label: {
-            VStack(alignment: .leading, spacing: 5) {
-                HStack { Text("\(number)").font(.callout.bold()); if Calendar.current.isDateInToday(date) { Circle().fill(.blue).frame(width: 6, height: 6) } }
-                ForEach(Array(events.prefix(2))) { item in
-                    HStack(spacing: 3) { Circle().fill(color(for: item.source)).frame(width: 5, height: 5); Text(item.title).lineLimit(1).font(.system(size: 9)) }
-                }
-                if events.count > 2 { Text("+\(events.count - 2) more").font(.system(size: 9)).foregroundStyle(.secondary) }
-                Spacer(minLength: 0)
-            }
-            .padding(7).frame(maxWidth: .infinity, minHeight: 78, alignment: .topLeading)
-            .background(Calendar.current.isDate(date, inSameDayAs: selectedDate) ? Color.accentColor.opacity(0.16) : Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 8))
-        }.buttonStyle(.plain).accessibilityLabel("\(date.formatted(date: .complete, time: .omitted)), \(events.count) events")
-    }
-
-    @ViewBuilder
-    private func eventList(for events: [UnifiedTimelineEvent]) -> some View {
-        if events.isEmpty {
-            ContentUnavailableView("No events", systemImage: "calendar", description: Text("There are no events in this range for the selected data mode."))
-        } else {
-            ForEach(events) { item in
-                HStack(alignment: .top, spacing: 14) {
-                    VStack(alignment: .trailing, spacing: 4) {
-                        Text(item.isAllDay ? "All-day" : item.start.formatted(date: .omitted, time: .shortened)).font(.headline)
-                        Text(item.start.formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(.secondary)
-                        if !item.isAllDay && item.end > item.start { Text("to \(item.end.formatted(date: .omitted, time: .shortened))").font(.caption).foregroundStyle(.secondary) }
-                    }.frame(width: 105, alignment: .trailing)
-                    RoundedRectangle(cornerRadius: 2).fill(color(for: item.source)).frame(width: 5)
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Image(systemName: icon(for: item.kind)).foregroundStyle(color(for: item.source))
-                            Text(item.title).font(.headline)
-                            Spacer()
-                            Label(item.isProtected ? "Protected" : "Flexible", systemImage: item.isProtected ? "lock.fill" : "arrow.left.arrow.right")
-                                .font(.caption).foregroundStyle(.secondary)
-                        }
-                        Text("\(item.kind.label) · \(item.verification.rawValue.capitalized) · \(item.timeZone)").font(.subheadline).foregroundStyle(.secondary)
-                        Label(item.source.label, systemImage: sourceIcon(for: item.source))
-                            .font(.caption).foregroundStyle(color(for: item.source))
-                        DisclosureGroup("Event details and source") {
-                            VStack(alignment: .leading, spacing: 4) {
-                                Text("Source: \(item.source.label)")
-                                Text(item.isAllDay ? "All-day event" : "Start: \(item.start.formatted(date: .complete, time: .shortened))")
-                                Text("Time zone: \(item.timeZone)")
-                                if item.source == .appleCalendar {
-                                    Text("The event title is displayed locally. Notes, attendees, locations and URLs are kept private and are not stored by this app.")
-                                }
-                                if let record = item.sourceRecordIDs.first.flatMap({ sourceID in model.sourceRecords.first(where: { $0.id == sourceID }) }),
-                                   let uri = record.sourceURI, let url = URL(string: uri) {
-                                    Link("Open source", destination: url).padding(.top, 3)
-                                }
-                            }.font(.caption).foregroundStyle(.secondary).padding(.top, 5)
-                        }.font(.caption)
-                    }
-                }
-                .padding(14).background(.background, in: RoundedRectangle(cornerRadius: 10))
-            }
-        }
-    }
-
-    private func timelineEvents(in interval: DateInterval) -> [UnifiedTimelineEvent] {
-        model.timelineEvents.filter { $0.start < interval.end && $0.displayEnd > interval.start }
-    }
-
     private func refreshAppleCalendarTimeline() {
         guard model.dataMode == .live else { return }
-        let interval: DateInterval
-        switch calendarMode {
-        case .day:
-            let start = Calendar.current.startOfDay(for: selectedDate)
-            interval = DateInterval(start: start, end: Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start)
-        case .week:
-            let range = weekRange(); interval = DateInterval(start: range.start, end: range.end)
-        case .month:
-            let components = Calendar.current.dateComponents([.year, .month], from: selectedDate)
-            let start = Calendar.current.date(from: components) ?? selectedDate
-            interval = DateInterval(start: start, end: Calendar.current.date(byAdding: .month, value: 1, to: start) ?? start)
-        }
-        model.appleCalendar.loadTimelineIfAuthorized(in: interval)
+        model.appleCalendar.loadTimelineIfAuthorized(in: CalendarPresentation.visibleInterval(
+            date: calendarState.date, mode: calendarState.mode))
     }
 
     private var planView: some View {
@@ -691,37 +528,7 @@ struct ContentView: View {
     private func color(for state: VerificationState) -> Color {
         switch state { case .verified: .green; case .inferred: .blue; case .disputed: .orange }
     }
-    private func color(for kind: AcademicItemKind) -> Color {
-        switch kind { case .classSession: .blue; case .tutorial: .purple; case .deadline: .orange; case .studyBlock: .teal }
-    }
-    private func color(for source: UnifiedTimelineSource) -> Color {
-        switch source {
-        case .canvas: .blue
-        case .outlook: .purple
-        case .demonstration, .unknown: .secondary
-        case .appleCalendar: .orange
-        case .managedCalendar: .green
-        }
-    }
-    private func icon(for kind: AcademicItemKind) -> String {
-        switch kind { case .classSession: "book.closed.fill"; case .tutorial: "person.2.fill"; case .deadline: "exclamationmark.circle.fill"; case .studyBlock: "pencil.and.outline" }
-    }
-    private func sourceIcon(for source: UnifiedTimelineSource) -> String {
-        switch source {
-        case .canvas: "arrow.down.doc"
-        case .outlook: "envelope"
-        case .demonstration: "sparkles"
-        case .appleCalendar: "calendar.badge.clock"
-        case .managedCalendar: "calendar.badge.checkmark"
-        case .unknown: "questionmark.circle"
-        }
-    }
-}
 
-private enum CalendarMode: String, CaseIterable, Identifiable {
-    case day, week, month
-    var id: String { rawValue }
-    var label: String { rawValue.capitalized }
 }
 
 @MainActor
@@ -802,11 +609,5 @@ final class CanvasConnectionViewModel {
         } catch {
             hasError = true; message = error.localizedDescription
         }
-    }
-}
-
-private extension AcademicItemKind {
-    var label: String {
-        switch self { case .classSession: "Class"; case .tutorial: "Tutorial"; case .deadline: "Deadline"; case .studyBlock: "Study block" }
     }
 }
