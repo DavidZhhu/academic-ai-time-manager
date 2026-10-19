@@ -10,7 +10,7 @@ The Calendar implementation from `feature/calendar-integration` is integrated in
 4. In live **Plan preview**, generate a proposal. Once connected in this app session, generation reads the same busy intervals from all accessible calendars and adds them to the scheduler's hard constraints. Imported fixed events, deadlines, availability, and protected rest retain their existing behavior. Demo Mode never reads Calendar or publishes sample sessions.
 5. Select **Preview Apple Calendar changes**, inspect before/after titles, dates, and zones, then **Approve exact changes**. Merely generating, previewing, or dismissing a plan makes no event writes. Previews expire after five minutes or the plan's earliest deadline, whichever comes first. Changed plans, progress, data mode, availability, or sync results invalidate the preview.
 6. In Connections, inspect published sessions and choose **Preview cancellation** or **Preview undo of last event change**. Both require approval. Undo works one confirmed event operation at a time, in reverse order, survives restart, and rechecks ownership/conflicts. Restoring a past session is rejected.
-7. After relaunch, choose **Refresh connection** to enable calendar-aware planning and Timeline display for the current session. The app does not automatically read Calendar on startup. System Settings controls OS-level revocation; refreshing does not prompt for access.
+7. After relaunch, the app checks EventKit's persisted authorization status without prompting. If full access is still granted, it automatically reads the active Timeline range and refreshes again as you switch Day, Week, or Month or navigate dates. If access has been revoked or is unavailable, the Timeline stays empty and Connections shows guidance. System Settings controls OS-level revocation.
 
 ## Modules and contracts
 
@@ -46,7 +46,7 @@ Undo itself uses a new explicit approval and the same checks/journal. It cannot 
 ## Known boundaries
 
 - Save success means saved to the local EventKit store. iCloud/Exchange propagation, account outages and remote delivery are owned by macOS; the API does not provide a remote sync-completion receipt here. An empty cached event query cannot prove that every server commitment has arrived.
-- Reads are user-initiated snapshots, not continuous monitoring. No background permissions, polling, notifications or sync-triggered replanning are added.
+- Reads occur at startup and when the visible Timeline range changes, only after EventKit has already granted full access. EventKit change notifications refresh the visible range while the app runs. No background permission request, polling, or sync-triggered replanning is added.
 - Planning reads at most 365 days. Proposed sessions must start within 366 days, last at most 24 hours, and be in the future. Calendar queries remain bounded well below EventKit's multi-year predicate limits.
 - Existing published study sessions count as busy when generating a new plan. Regeneration can therefore propose moving a task's existing slots; the preview exposes these moves. Omitted slots remain published until canceled. No automatic completion-based cancellation is implemented.
 - Personal Calendar events are read-only, transient Timeline entries as well as busy constraints. Their original titles are held only in memory for local Timeline rendering. They are not imported into SQLite, source records, review, AI analysis, or Calendar ownership storage. Full Calendar privacy controls are applied by the Calendar account.

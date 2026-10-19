@@ -13,7 +13,7 @@ final class AppleCalendarViewModel {
     var owned: [(key: String, event: AppleCalendarEvent)] = []
     var hasPending = false
     var canUndo = false
-    /// Transient, redacted values for the Timeline. This is never saved to SQLite or the journal.
+    /// Transient title-only values for the Timeline. This is never saved to SQLite or the journal.
     var timelineEvents: [AppleCalendarTimelineEvent] = []
     private var service: AppleCalendarService?
     private var timelineInterval: DateInterval?
@@ -30,37 +30,37 @@ final class AppleCalendarViewModel {
     func invalidate() { preview = nil; service?.invalidatePreview() }
     func requestPermission() async {
         working = true; defer { working = false }
-        do { try await connection().requestAccess(); refresh() }
+        do {
+            try await connection().requestAccess()
+            loadTimelineIfAuthorized(in: timelineInterval ?? defaultTimelineInterval())
+        }
         catch { failed(error) }
     }
     func refresh() {
         invalidate()
-        do {
-            let service = try connection()
-            sources = try service.sources()
-            if !sources.contains(where: { $0.id == selectedSource }) { selectedSource = sources.first?.id ?? "" }
-            ready = service.calendarID != nil; reloadOwned(service)
-            status = ready ? "Full access granted. The managed calendar is configured. Changes require a preview and your approval." : "Full access granted. Choose an account and create the dedicated calendar."
-            refreshTimeline(in: defaultTimelineInterval())
-        } catch { failed(error) }
+        loadTimelineIfAuthorized(in: timelineInterval ?? defaultTimelineInterval())
     }
     func createCalendar() {
         do { try connection().createCalendar(sourceID: selectedSource, approved: true); refresh() }
         catch { failed(error) }
     }
-    func refreshTimeline(in interval: DateInterval) {
-        guard let service else { return }
+    /// Starts at application launch and whenever the active Timeline range changes. It only reads
+    /// persisted EventKit authorization; it never requests authorization.
+    func loadTimelineIfAuthorized(in interval: DateInterval) {
         do {
-            timelineEvents = try service.timelineEvents(in: interval)
-            timelineInterval = interval
-            if changeObservation == nil {
-                changeObservation = try service.observeChanges { [weak self] in
-                    self?.refreshObservedTimeline()
-                }
+            let service = try connection()
+            guard let events = try AppleCalendarTimelineLoader.eventsIfAuthorized(service: service, in: interval) else {
+                handleUnavailableAccess(service.access)
+                return
             }
+            sources = try service.sources()
+            if !sources.contains(where: { $0.id == selectedSource }) { selectedSource = sources.first?.id ?? "" }
+            ready = service.calendarID != nil; reloadOwned(service)
+            status = ready ? "Full access granted. The managed calendar is configured. Changes require a preview and your approval." : "Full access granted. Choose an account and create the dedicated calendar."
+            installTimeline(events, interval: interval, service: service)
         } catch {
             timelineEvents = []
-            if service.access != .fullAccess { failed(error) }
+            failed(error)
         }
     }
     func makePlan(dataset: AcademicDataset, progress: [String: AssignmentProgress], availability: AvailabilitySettings,
@@ -90,7 +90,7 @@ final class AppleCalendarViewModel {
         do {
             let service = try connection(); try service.approve(preview); reloadOwned(service)
             status = "Approved changes saved to the local Calendar store. Account syncing is handled by macOS; remote delivery is not confirmed."
-            if let timelineInterval { refreshTimeline(in: timelineInterval) }
+            if let timelineInterval { loadTimelineIfAuthorized(in: timelineInterval) }
         } catch { failed(error) }
     }
     func undo() {
@@ -102,13 +102,40 @@ final class AppleCalendarViewModel {
         do {
             let service = try connection(); try service.recoverPendingWrite(); reloadOwned(service)
             status = "Pending write reconciled. Generate and review a fresh proposal before publishing again."
-            if let timelineInterval { refreshTimeline(in: timelineInterval) }
+            if let timelineInterval { loadTimelineIfAuthorized(in: timelineInterval) }
         }
         catch { failed(error) }
     }
     private func refreshObservedTimeline() {
         guard let timelineInterval else { return }
-        refreshTimeline(in: timelineInterval)
+        loadTimelineIfAuthorized(in: timelineInterval)
+    }
+    private func installTimeline(_ events: [AppleCalendarTimelineEvent], interval: DateInterval,
+                                 service: AppleCalendarService) {
+        timelineEvents = events
+        timelineInterval = interval
+        if changeObservation == nil {
+            do {
+                changeObservation = try service.observeChanges { [weak self] in
+                    self?.refreshObservedTimeline()
+                }
+            } catch {
+                timelineEvents = []
+                failed(error)
+            }
+        }
+    }
+    private func handleUnavailableAccess(_ access: CalendarAccess) {
+        timelineEvents = []; timelineInterval = nil
+        changeObservation?.cancel(); changeObservation = nil
+        switch access {
+        case .notDetermined:
+            status = "Calendar access has not been requested by this app."
+        case .fullAccess:
+            break
+        case .denied, .restricted, .writeOnly:
+            failed(AppleCalendarError.permission)
+        }
     }
     private func defaultTimelineInterval() -> DateInterval {
         let start = Calendar.current.startOfDay(for: Date())

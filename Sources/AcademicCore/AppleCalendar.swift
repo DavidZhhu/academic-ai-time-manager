@@ -91,6 +91,16 @@ public struct AppleCalendarTimelineEvent: Equatable, Sendable, Identifiable {
 /// connection. It does not request authorization or grant any write capability.
 public protocol AppleCalendarChangeObservation: AnyObject { func cancel() }
 
+/// Opens the read-only Timeline path only when EventKit has already granted full access. This
+/// helper never requests access, so application startup cannot trigger a permission prompt.
+@MainActor public enum AppleCalendarTimelineLoader {
+    public static func eventsIfAuthorized(service: AppleCalendarService,
+                                          in interval: DateInterval) throws -> [AppleCalendarTimelineEvent]? {
+        guard service.access == .fullAccess else { return nil }
+        return try service.timelineEvents(in: interval)
+    }
+}
+
 /// All calls are isolated to the main actor; test doubles never construct EKEventStore.
 @MainActor public protocol AppleCalendarClient: AnyObject {
     var access: CalendarAccess { get }

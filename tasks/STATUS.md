@@ -4,7 +4,35 @@ Updated: 2026-10-19 (Europe/London)
 
 Current position: **M0–M1 complete; Canvas sync, local completion tracking, demo/live separation, Microsoft Outlook integration, and unified Apple Calendar Timeline display are integrated on main and verified with fixtures. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
 
-## Latest task — show Apple Calendar event titles in Timeline (2026-10-19)
+## Latest task — automatic Apple Calendar Timeline loading (2026-10-19)
+
+### Root cause
+
+- Timeline launch and navigation already calculated the active Day, Week, or Month range, but called a refresh method that returned before constructing the Calendar service. The service was only created by the manual **Refresh connection** control, so a persisted full-access authorization was never checked after relaunch.
+
+### Delivered behavior
+
+- The app now constructs the Calendar service at Timeline startup and checks only the persisted EventKit authorization state. Existing Full Calendar Access automatically initializes the local connection and loads busy events for the visible range without calling the permission-request API.
+- Switching Day, Week, and Month and navigating dates reloads exactly the newly visible interval. EventKit change notifications continue to refresh the active range while the app runs.
+- Undetermined access leaves the existing noninteractive status unchanged. Denied, restricted, write-only, revoked, journal, and EventKit errors clear stale Timeline values and show local guidance without prompting for access.
+- Original titles remain transient local Timeline data. Personal events remain protected and read-only, and no notes, attendees, locations, URLs, account details, SQLite records, logs, AI inputs, or Calendar modifications are introduced.
+- Manual **Refresh connection** remains available and still invalidates a pending Calendar publication preview. Changing the Timeline range does not invalidate that preview.
+
+### Tests and build status
+
+- Debug suite: **118 tests passed, 0 failures**.
+- Added mock regression coverage for startup loading with persisted full access and zero permission requests, revoked authorization with zero reads/prompts, and distinct active-range reloads. Tests use synthetic events and a memory journal only.
+- Release suite: **118 tests passed, 0 failures**.
+- Release packaging completed through scripts/package-macos.sh; the arm64 bundle was rebuilt, ad-hoc signed, and plist-validated. Latest runnable app: [build-output/AcademicTimeManager.app](/Users/davidzhu/Desktop/academic-time-manager/build-output/AcademicTimeManager.app).
+
+### User verification after rebuilding
+
+1. Quit all copies of the app, then open the rebuilt application while **Academic Time Manager** still has Full Calendar Access in System Settings.
+2. Open **Timeline**. Busy events in the initial Week range should appear without selecting **Refresh connection** and without a permission prompt.
+3. Switch Day, Week, and Month; then use Previous, Next, and Today. The corresponding Calendar events should load for each range.
+4. To verify revocation handling, remove Calendar access in System Settings, return to the app, and navigate the Timeline. The events should clear and Connections should show the access guidance; the app should not prompt automatically.
+
+## Previous task — show Apple Calendar event titles in Timeline (2026-10-19)
 
 ### Delivered behavior
 
@@ -33,10 +61,10 @@ Current position: **M0–M1 complete; Canvas sync, local completion tracking, de
 ### Delivered behavior
 
 - Live Timeline now combines Oxford Canvas records, approved Outlook events, and busy Apple Calendar occurrences in Day, Week, and Month views. Calendar entries are orange and labelled **Apple Calendar**; app-owned study sessions are green and labelled **Academic AI Time Manager calendar**. Canvas remains blue, Outlook purple, and demonstrations muted.
-- External Calendar occurrences are presented as protected **Calendar commitment** entries. The app redacts all personal titles, notes, locations, attendees, URLs, calendar/account names and other personal metadata. It never writes these events to SQLite, source records, review data, analysis inputs, or the ownership journal.
+- External Calendar occurrences are presented as protected **Apple Calendar** entries with a title held only in transient memory. The app excludes notes, locations, attendees, URLs, calendar/account names and other personal metadata. It never writes these events to SQLite, source records, review data, analysis inputs, or the ownership journal.
 - Only events already proven journal-owned by their UUID marker and exact saved record display their study title and remain eligible for the existing preview/approval/cancel/undo path. Other events, including personal events placed in the dedicated calendar, remain read-only.
 - The Timeline uses overlap-based date selection, so all-day and multi-day entries appear in every affected Day, Week, and Month. EventKit supplies recurring occurrences within the selected range; each occurrence has an in-memory start/end-specific identity. Free/canceled items are omitted, preserving the existing busy-time conflict policy.
-- An exact same-title/time Canvas or Outlook mirror collapses to the imported academic item. Duplicate detection uses a process-local normalized title hash for the redacted Calendar entry and never persists raw personal content. Calendar change notifications reload the active visible range after the user has explicitly refreshed a full-access connection. The app still does not access EventKit at launch.
+- An exact same-title/time Canvas or Outlook mirror collapses to the imported academic item. Duplicate detection uses a process-local normalized title hash and never persists raw personal content. Calendar change notifications reload the active visible range after a persisted full-access authorization initializes at launch.
 - Existing scheduling constraints, Canvas synchronization, assignment completion state, demonstration isolation, Calendar approval and recovery rules are unchanged. No Apple Calendar event is modified, deleted, rescheduled, or imported into persistent storage by Timeline refresh.
 
 ### Tests and build status
@@ -47,8 +75,8 @@ Current position: **M0–M1 complete; Canvas sync, local completion tracking, de
 
 ### User verification after rebuilding
 
-1. Open the rebuilt app, go to **Connections → Apple Calendar**, and select **Refresh connection** after granting full access yourself. This is the only action that begins Timeline reads.
-2. Return to **Timeline**. Check Day, Week, and Month views: existing busy events should appear as orange, protected **Calendar commitment** entries without personal titles. App-owned study sessions should be green.
+1. Open the rebuilt app after granting full access yourself. The Timeline begins its read automatically without a prompt.
+2. Check Day, Week, and Month views: existing busy events should appear as orange, protected **Apple Calendar** entries with their original titles. App-owned study sessions should be green.
 3. Change or add a test Calendar event and return to the current Timeline range; EventKit change notifications should refresh the displayed commitments. Confirm free events do not appear or block time.
 4. Use only a test calendar and synthetic future work for the existing preview/approval flow. Timeline refresh does not authorize any personal-event change.
 

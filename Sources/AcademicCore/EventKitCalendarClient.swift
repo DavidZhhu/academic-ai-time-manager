@@ -72,7 +72,7 @@ private final class EventKitChangeObservation: AppleCalendarChangeObservation {
         try requireAccess(); return store.event(withIdentifier: id).map(snapshot)
     }
     public func observeChanges(_ handler: @escaping @MainActor () -> Void) -> any AppleCalendarChangeObservation {
-        // The EventKit store is created only after the user has explicitly refreshed a granted connection.
+        // The EventKit store is created only after the app has observed persisted full access.
         EventKitChangeObservation(store: store, handler: handler)
     }
     public func apply(before: AppleCalendarEvent?, after: AppleCalendarEvent?) throws -> AppleCalendarEvent? {

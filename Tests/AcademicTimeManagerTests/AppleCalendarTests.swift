@@ -480,6 +480,59 @@ final class AppleCalendarTests: XCTestCase {
         XCTAssertEqual(client.writes, 0)
     }
 
+    @MainActor func testStartupLoaderUsesPersistedFullAccessWithoutRequestingPermission() throws {
+        let client = MockCalendar(); let storage = MemoryCalendarJournal(); let now = instant
+        let service = try AppleCalendarService(client: client, storage: storage, now: { now })
+        let interval = DateInterval(start: instant, end: instant.addingTimeInterval(3600))
+        client.values = [
+            AppleCalendarEvent(id: "persisted-access", calendarID: "personal", marker: nil, title: "Research meeting",
+                start: instant, end: instant.addingTimeInterval(1800), timeZone: "Europe/London")
+        ]
+
+        let loaded = try AppleCalendarTimelineLoader.eventsIfAuthorized(service: service, in: interval)
+
+        XCTAssertEqual(loaded?.map(\.title), ["Research meeting"])
+        XCTAssertEqual(client.reads, 1)
+        XCTAssertEqual(client.permissionRequests, 0)
+        XCTAssertEqual(client.writes, 0)
+        XCTAssertTrue(storage.value.records.isEmpty)
+    }
+
+    @MainActor func testStartupLoaderDoesNotReadOrPromptWhenPermissionIsRevoked() throws {
+        let client = MockCalendar(); client.access = .denied
+        let service = try AppleCalendarService(client: client, storage: MemoryCalendarJournal(), now: { self.instant })
+        let interval = DateInterval(start: instant, end: instant.addingTimeInterval(3600))
+
+        let loaded = try AppleCalendarTimelineLoader.eventsIfAuthorized(service: service, in: interval)
+
+        XCTAssertNil(loaded)
+        XCTAssertEqual(client.reads, 0)
+        XCTAssertEqual(client.permissionRequests, 0)
+        XCTAssertEqual(client.writes, 0)
+    }
+
+    @MainActor func testStartupLoaderRefreshesOnlyTheNewActiveTimelineRange() throws {
+        let client = MockCalendar(); let storage = MemoryCalendarJournal(); let now = instant
+        let service = try AppleCalendarService(client: client, storage: storage, now: { now })
+        let today = DateInterval(start: instant, end: instant.addingTimeInterval(86400))
+        let tomorrow = DateInterval(start: today.end, end: today.end.addingTimeInterval(86400))
+        client.values = [
+            AppleCalendarEvent(id: "today", calendarID: "personal", marker: nil, title: "Today",
+                start: instant.addingTimeInterval(3600), end: instant.addingTimeInterval(5400), timeZone: "Europe/London"),
+            AppleCalendarEvent(id: "tomorrow", calendarID: "personal", marker: nil, title: "Tomorrow",
+                start: today.end.addingTimeInterval(3600), end: today.end.addingTimeInterval(5400), timeZone: "Europe/London")
+        ]
+
+        let first = try AppleCalendarTimelineLoader.eventsIfAuthorized(service: service, in: today)
+        let second = try AppleCalendarTimelineLoader.eventsIfAuthorized(service: service, in: tomorrow)
+
+        XCTAssertEqual(first?.map(\.title), ["Today"])
+        XCTAssertEqual(second?.map(\.title), ["Tomorrow"])
+        XCTAssertEqual(client.reads, 2)
+        XCTAssertEqual(client.permissionRequests, 0)
+        XCTAssertTrue(storage.value.records.isEmpty)
+    }
+
     @MainActor func testTimelineShowsOnlyOwnedManagedSessionsAndRefreshesOnCalendarChange() throws {
         let (service, client, storage) = try setup()
         try service.approve(preview(service))

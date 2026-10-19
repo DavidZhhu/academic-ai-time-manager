@@ -120,8 +120,8 @@ final class PlannerViewModel {
 
     var assignments: [PlanningAssignment] { dataset.assignments }
 
-    /// Apple Calendar values are transient and only included after the user refreshes a granted
-    /// Calendar connection. Demo Mode deliberately never reads or displays personal commitments.
+    /// Apple Calendar values are transient and load automatically when EventKit has previously
+    /// granted full access. Demo Mode deliberately never reads or displays personal commitments.
     var timelineEvents: [UnifiedTimelineEvent] {
         UnifiedTimeline.events(academicItems: dataset.items, sources: dataset.sources,
             calendarEvents: dataMode == .live ? appleCalendar.timelineEvents : [])
@@ -435,7 +435,7 @@ struct ContentView: View {
             let start = Calendar.current.date(from: components) ?? selectedDate
             interval = DateInterval(start: start, end: Calendar.current.date(byAdding: .month, value: 1, to: start) ?? start)
         }
-        model.appleCalendar.refreshTimeline(in: interval)
+        model.appleCalendar.loadTimelineIfAuthorized(in: interval)
     }
 
     private var planView: some View {
