@@ -1,0 +1,17 @@
+# Integration Contracts
+
+## Canvas LMS
+Oxford instance: `https://canvas.ox.ac.uk`. The Connections screen accepts a manually generated API token through a secure field, stores it in macOS Keychain, and validates it with `GET /api/v1/users/self`. The request is read-only; it sends the token in the HTTPS `Authorization: Bearer` header, never a URL parameter. The response body is discarded. The local ad-hoc-signed build stores a generic password item in the user's login Keychain using macOS's file-based Keychain ACL model. It omits Data Protection access groups because those require a signed app identifier entitlement, unavailable to this local bundle. It sets no synchronizable flag, so the item is not requested for iCloud Keychain sync. Tokens are not persisted in SQLite, source files, or logs.
+
+The existing read-only importer can fetch course and assignment pages once the user explicitly requests a sync. It uses bounded retries and same-origin pagination checks. Tests use dummy tokens and a mocked transport; they never contact a Canvas instance. Do not initiate a live connection during development or tests. Manually generated tokens are implemented for this single-user, private app; before distributing the app to multiple users, confirm Oxford's policy and replace manual token entry with the institution-approved OAuth flow if required. A Canvas calendar feed may complement APIs but is not a substitute for assignment details. Never assume every timetable or tutorial is in Canvas.
+
+Assignment requests include `include[]=submission`, which Canvas documents as the requesting user's current submission ([Assignments API](https://developerdocs.instructure.com/services/canvas/resources/assignments)). The importer retains only `submitted_at` and `workflow_state`. A timestamp together with `submitted`, `pending_review`, or `graded` enables a suggestion to mark the assignment completed locally. A grade alone, an assignment-wide submission flag, missing evidence, or malformed optional evidence does not trigger a suggestion. The user must explicitly change local status; repeated syncs preserve that status. All requests remain GET, and no submission/completion endpoint is written. Previously cached dated assignments support local progress immediately; submission hints and metadata for previously cached undated assignments become available after the next user-initiated sync.
+
+## Microsoft Graph / Outlook
+Use OAuth PKCE, explicit mailbox consent, and minimal scopes. Ingest messages/events relevant to academics. Support sender/folder allowlists, classification, corrections, delta queries where available, and incremental checkpoints. Preserve original message ID and source metadata. Avoid reading the entire mailbox into the AI model. Graph webhook push may require a cloud callback and is not guaranteed in local-first MVP.
+
+## Apple Calendar
+Use EventKit with required user authorization. Read availability as permitted; write only to a dedicated AI-managed calendar. Map internal IDs to EventKit event IDs, verify updates/deletes, avoid duplicate entries, and expose recovery for sync failures. Check macOS entitlement, permission, and calendar availability behavior in M0/M1.
+
+## Cross-source rules
+Store source identifier, provider, retrieval timestamp, original timezone, confidence, and evidence link for every extracted fact. Separate source facts from user-verified canonical facts and AI hypotheses. Preserve conflicts for human review. Do not assume that newest always means correct.
