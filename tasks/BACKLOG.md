@@ -17,6 +17,6 @@ Priority: P0 required for MVP, P1 after MVP. Real services remain gated on user/
 | T011 | M3 | P0 | Assignment decomposition and effort estimates | Editable outputs and evidence | Partial: deterministic editable effort and stage breakdown in local plan UI; provider interface/validator remain fixture-only |
 | T012 | M4 | P0 | Constraint scheduler | No-overlap, deadline, protected-time tests | Partial: deterministic core and UI proposal; fixed events, protected rest, breaks, priority, source, and local rescheduling covered; no calendar publication |
 | T013 | M4 | P0 | Approval, conflict, audit and undo | Conflict and rollback tests | Partial: conflict/approval/audit storage, no UI/write/undo |
-| T014 | M5 | P0 | Package and document macOS release | Clean-install smoke test | Partial: ad-hoc-signed local `.app`; no Developer ID signing/notarization |
+| T014 | M5 | P0 | Package and document macOS release | Clean-install smoke test | Partial: stable Apple Development-signed local `.app` with strict verification; no Developer ID signing/notarization |
 | T015 | Future | P1 | AI conversation and daily briefings | Deferred | Deferred |
 | T016 | Future | P1 | Hybrid study tracking and learning | Deferred | Deferred |

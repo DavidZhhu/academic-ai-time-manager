@@ -59,10 +59,10 @@ Connections also offers previewed cancellation and undo of the last event change
 - `tasks/BACKLOG.md` — implementation tasks and priorities.
 - `tasks/STATUS.md` — living execution log.
 
-To create a local ad-hoc-signed `.app` bundle for smoke testing (no Developer ID signing or notarization):
+To create a local `.app` bundle, use the packaging script. It selects the sole available Apple Development identity, verifies the stable identifier and Apple trust chain, and fails if stable signing is unavailable:
 
 ```sh
 ./scripts/package-macos.sh
 ```
 
-The bundle is written to `build-output/AcademicTimeManager.app` by default. Signing, notarization, and distribution are not configured.
+The bundle is written to `build-output/AcademicTimeManager.app` by default. An explicit ad-hoc escape hatch exists only for disposable builds and does not preserve macOS privacy identity. See [Development signing](docs/DEVELOPMENT_SIGNING.md) for identity selection, verification, certificate renewal, and distribution limits. Developer ID signing, notarization, and distribution are not configured.

@@ -21,7 +21,7 @@ The Calendar implementation from `feature/calendar-integration` is integrated in
 - `Sources/AcademicTimeManager/AppleCalendarUI.swift`: connection/setup, preview, approval, status, cancellation, recovery and undo controls.
 - `Tests/AcademicTimeManagerTests/AppleCalendarTests.swift`: entirely synthetic client/store fixtures; no production adapter construction.
 
-`App.swift` has small wiring changes. No Outlook code, SQLite migration, shared source classification, dependency, or package-target change is required. The existing package declared a missing Resources directory; `CalendarPrivacy.txt` supplies a tracked resource so clean worktree builds succeed. `scripts/package-macos.sh` includes the full-access usage description. Its current distribution is unsandboxed and ad-hoc signed. A future App Sandbox distribution must add Apple's calendar entitlement and undergo its own signing/permission verification.
+`App.swift` has small wiring changes. No Outlook code, SQLite migration, shared source classification, dependency, or package-target change is required. The existing package declared a missing Resources directory; `CalendarPrivacy.txt` supplies a tracked resource so clean worktree builds succeed. `scripts/package-macos.sh` includes the full-access usage description. Local builds remain unsandboxed and are now certificate-signed with an Apple Development identity so TCC sees a stable designated requirement across rebuilds. A future App Sandbox distribution must add Apple's calendar entitlement and undergo its own signing/permission verification. See [DEVELOPMENT_SIGNING.md](DEVELOPMENT_SIGNING.md).
 
 ## Ownership and duplicate prevention
 

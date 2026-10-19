@@ -4,7 +4,39 @@ Updated: 2026-10-19 (Europe/London)
 
 Current position: **M0–M1 complete; Canvas sync, local completion tracking, demo/live separation, Microsoft Outlook integration, and unified Apple Calendar Timeline display are integrated on main and verified with fixtures. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
 
-## Latest task — automatic Apple Calendar Timeline loading (2026-10-19)
+## Latest task — stable development signing for Calendar permission persistence (2026-10-19)
+
+### Root cause and investigation
+
+- The bundle identifier was and remains `org.example.AcademicTimeManager`; the Microsoft OAuth callback remains `msauth.org.example.AcademicTimeManager`. Neither value caused the repeated Calendar prompt.
+- The old packaging script always used `codesign --sign -`, producing an ad-hoc signature. Inspection of the prior bundle showed `flags=adhoc`, no TeamIdentifier, and a designated requirement containing only that build's `cdhash`. Recompiling changes the executable hash, so macOS TCC can no longer match the rebuilt code to the identity that received Full Calendar Access.
+- The bundle had no signing entitlements. Canvas and Microsoft credentials use generic-password items in the login Keychain, with stable service/account names in their existing implementations.
+- A read-only `security find-identity -v -p codesigning` check found exactly one valid Apple Development identity. Only public certificate name/hash/chain metadata was inspected; no private key was read, exported, or printed. Public-chain validation succeeded through the Apple Worldwide Developer Relations G3 intermediate to the Apple root. The certificate is valid until October 2027.
+
+### Changes
+
+- `scripts/package-macos.sh` now preserves the existing bundle ID and uses the sole Apple Development identity by default. If none or multiple identities are present, packaging fails with instructions instead of silently falling back to ad-hoc signing. `ACADEMIC_CODE_SIGN_IDENTITY` supports an explicit local selection; `ACADEMIC_ADHOC_SIGNING=1` is an explicit disposable-build escape hatch.
+- Added `scripts/verify-macos-signature.sh`. It validates the Info.plist and CodeDirectory identifiers, strict/deep signature integrity, Apple trust anchor, TeamIdentifier, non-ad-hoc flags, and rejects a designated requirement tied only to a `cdhash`.
+- Added `docs/DEVELOPMENT_SIGNING.md` and updated README, architecture, security, integration, and Calendar documentation. The guide covers Xcode certificate setup/renewal, identity selection, verification, TCC/Keychain transition behavior, and the separate Developer ID/notarization distribution boundary.
+- No source integration, database, Keychain record, EventKit behavior, OAuth scope, or entitlement changed. No privacy permission was reset, no Keychain item was deleted, and no app/account was opened.
+
+### Tests and build status
+
+- Debug suite: **118 tests passed, 0 failures**.
+- Release suite: **118 tests passed, 0 failures**.
+- Release packaging succeeded with a certificate-backed Apple Development signature. The verifier reported identifier `org.example.AcademicTimeManager`, a nonempty TeamIdentifier, an Apple-anchored designated requirement, and no `adhoc` flag. The bundle contains no new entitlements.
+- Latest runnable app: [build-output/AcademicTimeManager.app](/Users/davidzhu/Desktop/academic-time-manager/build-output/AcademicTimeManager.app).
+- The app was not launched. Tests use mocks and temporary storage; no EventKit store, personal Calendar data, Canvas/Outlook account, credential, or production database was accessed.
+
+### Remaining manual verification and limits
+
+1. Because the previous installed bundle was ad-hoc signed, macOS may request Calendar authorization once when this Apple Development-signed identity first runs. The work did not reset TCC. Grant access interactively only if macOS presents the normal prompt for the expected app.
+2. The signing-identity transition may also produce a one-time login Keychain access prompt for existing Canvas or Microsoft items. The app preserved the item service/account names and does not migrate or delete them.
+3. Quit all old copies, open the rebuilt bundle, verify Calendar events load, quit, rebuild again with the same certificate, and reopen. Full Calendar Access should persist across the second certificate-signed rebuild without a new prompt.
+4. Certificate renewal/replacement can change the designated requirement and cause another one-time prompt. Use Xcode **Settings → Accounts → Manage Certificates**, select the intended identity explicitly if several exist, and rerun the verifier. No certificate creation is currently required because a valid identity is installed.
+5. This is local development signing. Independent distribution remains blocked on a Developer ID Application certificate, Apple Developer program configuration, and notarization; none was requested or changed. Gatekeeper acceptance for third-party distribution is not claimed.
+
+## Previous task — automatic Apple Calendar Timeline loading (2026-10-19)
 
 ### Root cause
 
@@ -282,7 +314,7 @@ A related availability bug constructed a reversed date interval when today's stu
 | M3 — Academic intelligence | Partial | Provider-independent interfaces and validation exist. Local email/attachment extraction, editable estimates, and deterministic stages are implemented; no cloud/general-language inference provider is active. |
 | M4 — Scheduling and calendar | Partial | Day/week/month unified calendar UI and deterministic local proposals are implemented. EventKit preview/approval, safe publication, cancellation, undo, ownership audit, transient personal-event display and refresh are wired. End-to-end live acceptance remains unverified. |
 
-| M5 — Hardening and packaging | Partial | Debug/release suites pass; local ad-hoc-signed app bundle builds. No notarization, Developer ID signing, or in-app visual smoke test. |
+| M5 — Hardening and packaging | Partial | Debug/release suites pass; local Apple Development-signed bundle has strict signature checks. No notarization, Developer ID signing, or in-app visual smoke test. |
 
 ## Previous session — implemented behavior
 

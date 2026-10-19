@@ -5,6 +5,35 @@ APP_PATH="${1:-build-output/AcademicTimeManager.app}"
 CONTENTS_PATH="$APP_PATH/Contents"
 EXECUTABLE_PATH="$CONTENTS_PATH/MacOS"
 BUILD_ROOT="${ACADEMIC_SWIFT_SCRATCH_PATH:-.build}"
+BUNDLE_IDENTIFIER="org.example.AcademicTimeManager"
+
+select_signing_identity() {
+    if [ "${ACADEMIC_ADHOC_SIGNING:-0}" = "1" ]; then
+        if [ -n "${ACADEMIC_CODE_SIGN_IDENTITY:-}" ]; then
+            printf 'Set either ACADEMIC_ADHOC_SIGNING or ACADEMIC_CODE_SIGN_IDENTITY, not both.\n' >&2
+            exit 1
+        fi
+        printf '%s\n' "-"
+        return
+    fi
+    if [ -n "${ACADEMIC_CODE_SIGN_IDENTITY:-}" ]; then
+        printf '%s\n' "$ACADEMIC_CODE_SIGN_IDENTITY"
+        return
+    fi
+
+    IDENTITIES=$(/usr/bin/security find-identity -v -p codesigning 2>/dev/null || true)
+    APPLE_DEVELOPMENT_COUNT=$(printf '%s\n' "$IDENTITIES" | /usr/bin/awk '/"Apple Development:/{count++} END {print count + 0}')
+    if [ "$APPLE_DEVELOPMENT_COUNT" -eq 1 ]; then
+        printf '%s\n' "$IDENTITIES" | /usr/bin/awk '/"Apple Development:/{print $2; exit}'
+        return
+    fi
+    if [ "$APPLE_DEVELOPMENT_COUNT" -eq 0 ]; then
+        printf 'No Apple Development signing identity is available. Configure one in Xcode, or set ACADEMIC_ADHOC_SIGNING=1 only for a disposable build that will not preserve macOS privacy grants.\n' >&2
+    else
+        printf 'Multiple Apple Development signing identities are available. Set ACADEMIC_CODE_SIGN_IDENTITY to the intended certificate name or SHA-1 hash.\n' >&2
+    fi
+    exit 1
+}
 
 if [ -n "${ACADEMIC_SWIFT_CACHE_PATH:-}" ] && [ -n "${ACADEMIC_SWIFT_SCRATCH_PATH:-}" ]; then
     CLANG_MODULE_CACHE_PATH="${ACADEMIC_CLANG_CACHE_PATH:-/private/tmp/academic-time-manager-clang-cache}" \
@@ -43,7 +72,12 @@ cat > "$CONTENTS_PATH/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
-/usr/bin/codesign --force --deep --sign - --identifier org.example.AcademicTimeManager "$APP_PATH"
-/usr/bin/codesign --verify --deep --strict "$APP_PATH"
-/usr/bin/plutil -lint "$CONTENTS_PATH/Info.plist"
-printf 'Built ad-hoc-signed local app bundle: %s\n' "$APP_PATH"
+SIGNING_IDENTITY=$(select_signing_identity)
+/usr/bin/codesign --force --sign "$SIGNING_IDENTITY" --identifier "$BUNDLE_IDENTIFIER" --timestamp=none "$APP_PATH"
+if [ "$SIGNING_IDENTITY" = "-" ]; then
+    sh scripts/verify-macos-signature.sh "$APP_PATH" "$BUNDLE_IDENTIFIER" adhoc
+    printf 'Built explicitly ad-hoc-signed disposable app bundle: %s\n' "$APP_PATH"
+else
+    sh scripts/verify-macos-signature.sh "$APP_PATH" "$BUNDLE_IDENTIFIER" stable
+    printf 'Built Apple Development-signed local app bundle: %s\n' "$APP_PATH"
+fi
