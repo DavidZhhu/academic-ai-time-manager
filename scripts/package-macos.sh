@@ -39,6 +39,7 @@ cat > "$CONTENTS_PATH/Info.plist" <<'PLIST'
     <array><dict><key>CFBundleURLName</key><string>Microsoft OAuth callback</string>
     <key>CFBundleURLSchemes</key><array><string>msauth.org.example.AcademicTimeManager</string></array></dict></array>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
+    <key>NSCalendarsFullAccessUsageDescription</key><string>Read calendar busy times to avoid conflicts and save only study sessions you approve in the dedicated Academic AI Time Manager calendar.</string>
 </dict>
 </plist>
 PLIST

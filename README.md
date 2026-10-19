@@ -31,7 +31,7 @@ Switching modes clears the current proposal without deleting records or changing
 
 ## Connect Microsoft Outlook
 
-See [Microsoft setup](docs/MICROSOFT_SETUP.md) for the Entra registration and consent steps. In **Connections**, enter the non-secret client ID, save settings, and choose **Add Microsoft account** separately for Oxford and personal Outlook/Hotmail. Microsoft handles login in a browser; the application stores tokens in Keychain. Use each account's **Synchronise now** button, then review proposals in **Review inbox**. Polling is optional and off by default. No mailbox writes or Apple Calendar publication are performed.
+See [Microsoft setup](docs/MICROSOFT_SETUP.md) for the Entra registration and consent steps. In **Connections**, enter the non-secret client ID, save settings, and choose **Add Microsoft account** separately for Oxford and personal Outlook/Hotmail. Microsoft handles login in a browser; the application stores tokens in Keychain. Use each account's **Synchronise now** button, then review proposals in **Review inbox**. Polling is optional and off by default. Outlook sync and review never write to mailboxes or publish to Apple Calendar. Calendar publication uses the separate preview and approval flow below.
 
 Both accounts use shared local classification rules. Relevant PDF/DOCX attachments are processed within safety limits. Uncertain dates need confirmation, and cancellation/rescheduling proposals remain advisory. No cloud AI transmission occurs.
 
@@ -40,6 +40,12 @@ Both accounts use shared local classification rules. Relevant PDF/DOCX attachmen
 Open **Plan preview** and use each assignment's **Local status** menu to select **Not Started**, **In Progress**, or **Completed**. Changes are saved immediately in SQLite and survive restarts and Canvas sync. Completed assignments move to their own section; choose **Reopen** to return one to Not Started.
 
 Only unfinished assignments with future deadlines receive new study sessions. Past deadlines appear under **Overdue**; undated assignments appear under **No deadline**. Reopening an overdue assignment does not change its deadline or schedule new work. Generate a new proposal after changing status. Where Canvas supplies submission evidence, the app offers a completion suggestion for you to confirm; it never changes your Canvas submission or automatically marks local work finished.
+
+## Apple Calendar
+
+When ready to test, open **Connections → Apple Calendar**, explicitly request Calendar access, select an account, and approve creation of the dedicated **Academic AI Time Manager** calendar. Generate a live plan, select **Preview Apple Calendar changes**, then approve the exact changes. Previewing alone makes no writes. Demo plans cannot be published.
+
+Connections also offers previewed cancellation and undo of the last event change. After restarting, use **Refresh connection** before calendar-aware planning. Personal events are used locally as busy constraints; only owned study sessions can be changed. See [Apple Calendar integration](docs/APPLE_CALENDAR.md) for recovery limits and the user-led test-account checklist. No real calendar was accessed during development.
 
 ## Project map
 - `AGENTS.md` — Codex execution contract.
