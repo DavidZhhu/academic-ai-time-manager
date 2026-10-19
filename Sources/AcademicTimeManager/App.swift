@@ -120,6 +120,13 @@ final class PlannerViewModel {
 
     var assignments: [PlanningAssignment] { dataset.assignments }
 
+    /// Apple Calendar values are transient and only included after the user refreshes a granted
+    /// Calendar connection. Demo Mode deliberately never reads or displays personal commitments.
+    var timelineEvents: [UnifiedTimelineEvent] {
+        UnifiedTimeline.events(academicItems: dataset.items, sources: dataset.sources,
+            calendarEvents: dataMode == .live ? appleCalendar.timelineEvents : [])
+    }
+
     func assignmentStatus(for id: String) -> AssignmentStatus { assignmentProgress[id]?.status ?? .notStarted }
 
     func setAssignmentStatus(_ status: AssignmentStatus, for id: String) {
@@ -220,6 +227,12 @@ struct ContentView: View {
         .onChange(of: canvasConnection.isConnected) { _, connected in
             if connected { model.dataMode = .live }
         }
+        .onAppear { refreshAppleCalendarTimeline() }
+        .onChange(of: selected) { _, page in
+            if page == "Timeline" { refreshAppleCalendarTimeline() }
+        }
+        .onChange(of: selectedDate) { _, _ in refreshAppleCalendarTimeline() }
+        .onChange(of: calendarMode) { _, _ in refreshAppleCalendarTimeline() }
     }
 
     private var dataModeControls: some View {
@@ -239,7 +252,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 20) {
             HStack(alignment: .top) {
                 heading(model.dataMode == .demo ? "Demonstration calendar" : "Academic calendar",
-                        subtitle: model.dataMode == .demo ? "Sample events for exploring the app" : "Canvas events and approved Outlook commitments")
+                        subtitle: model.dataMode == .demo ? "Sample events for exploring the app" : "Canvas, approved Outlook, and protected Apple Calendar commitments")
                 Spacer()
                 Picker("Calendar view", selection: $calendarMode) {
                     ForEach(CalendarMode.allCases) { mode in Text(mode.label).tag(mode) }
@@ -290,10 +303,10 @@ struct ContentView: View {
         if let next = Calendar.current.date(byAdding: component, value: amount, to: selectedDate) { selectedDate = next }
     }
 
-    private func dayEvents() -> [AcademicItem] {
+    private func dayEvents() -> [UnifiedTimelineEvent] {
         let calendar = Calendar.current
         guard let end = calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: selectedDate)) else { return [] }
-        return model.dataset.items.filter { $0.startsAt >= calendar.startOfDay(for: selectedDate) && $0.startsAt < end }.sorted { $0.startsAt < $1.startsAt }
+        return timelineEvents(in: DateInterval(start: calendar.startOfDay(for: selectedDate), end: end))
     }
 
     private func weekRange() -> (start: Date, end: Date) {
@@ -306,9 +319,9 @@ struct ContentView: View {
         return (start, end)
     }
 
-    private func weekEvents() -> [AcademicItem] {
+    private func weekEvents() -> [UnifiedTimelineEvent] {
         let range = weekRange()
-        return model.dataset.items.filter { $0.startsAt >= range.start && $0.startsAt < range.end }.sorted { $0.startsAt < $1.startsAt }
+        return timelineEvents(in: DateInterval(start: range.start, end: range.end))
     }
 
     private var monthCalendar: some View {
@@ -342,12 +355,14 @@ struct ContentView: View {
     }
 
     private func monthDay(_ date: Date, number: Int) -> some View {
-        let events = model.dataset.items.filter { Calendar.current.isDate($0.startsAt, inSameDayAs: date) }
+        let start = Calendar.current.startOfDay(for: date)
+        let end = Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start
+        let events = timelineEvents(in: DateInterval(start: start, end: end))
         return Button { selectedDate = date } label: {
             VStack(alignment: .leading, spacing: 5) {
                 HStack { Text("\(number)").font(.callout.bold()); if Calendar.current.isDateInToday(date) { Circle().fill(.blue).frame(width: 6, height: 6) } }
                 ForEach(Array(events.prefix(2))) { item in
-                    HStack(spacing: 3) { Circle().fill(color(for: item.kind)).frame(width: 5, height: 5); Text(item.title).lineLimit(1).font(.system(size: 9)) }
+                    HStack(spacing: 3) { Circle().fill(color(for: item.source)).frame(width: 5, height: 5); Text(item.title).lineLimit(1).font(.system(size: 9)) }
                 }
                 if events.count > 2 { Text("+\(events.count - 2) more").font(.system(size: 9)).foregroundStyle(.secondary) }
                 Spacer(minLength: 0)
@@ -358,37 +373,37 @@ struct ContentView: View {
     }
 
     @ViewBuilder
-    private func eventList(for events: [AcademicItem]) -> some View {
+    private func eventList(for events: [UnifiedTimelineEvent]) -> some View {
         if events.isEmpty {
             ContentUnavailableView("No events", systemImage: "calendar", description: Text("There are no events in this range for the selected data mode."))
         } else {
             ForEach(events) { item in
-                let providers = item.sourceRecordIDs.map(model.sourceName(for:))
-                let isCanvasImport = providers.contains("Canvas")
-                let isOutlookImport = providers.contains("Outlook")
                 HStack(alignment: .top, spacing: 14) {
                     VStack(alignment: .trailing, spacing: 4) {
-                        Text(item.startsAt.formatted(date: .omitted, time: .shortened)).font(.headline)
-                        Text(item.startsAt.formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(.secondary)
-                        if item.endsAt > item.startsAt { Text("to \(item.endsAt.formatted(date: .omitted, time: .shortened))").font(.caption).foregroundStyle(.secondary) }
+                        Text(item.isAllDay ? "All-day" : item.start.formatted(date: .omitted, time: .shortened)).font(.headline)
+                        Text(item.start.formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(.secondary)
+                        if !item.isAllDay && item.end > item.start { Text("to \(item.end.formatted(date: .omitted, time: .shortened))").font(.caption).foregroundStyle(.secondary) }
                     }.frame(width: 105, alignment: .trailing)
-                    RoundedRectangle(cornerRadius: 2).fill(color(for: item.kind)).frame(width: 5)
+                    RoundedRectangle(cornerRadius: 2).fill(color(for: item.source)).frame(width: 5)
                     VStack(alignment: .leading, spacing: 6) {
                         HStack {
-                            Image(systemName: icon(for: item.kind)).foregroundStyle(color(for: item.kind))
+                            Image(systemName: icon(for: item.kind)).foregroundStyle(color(for: item.source))
                             Text(item.title).font(.headline)
                             Spacer()
                             Label(item.isProtected ? "Protected" : "Flexible", systemImage: item.isProtected ? "lock.fill" : "arrow.left.arrow.right")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
-                        Text("\(item.kind.label) · \(item.verification.rawValue.capitalized) · \(item.timeZoneIdentifier)").font(.subheadline).foregroundStyle(.secondary)
-                        Label(isCanvasImport ? "Imported from Oxford Canvas" : isOutlookImport ? "Approved from Outlook email" : "Demonstration data", systemImage: isCanvasImport ? "arrow.down.doc" : "sparkles")
-                            .font(.caption).foregroundStyle(isCanvasImport ? .blue : .secondary)
+                        Text("\(item.kind.label) · \(item.verification.rawValue.capitalized) · \(item.timeZone)").font(.subheadline).foregroundStyle(.secondary)
+                        Label(item.source.label, systemImage: sourceIcon(for: item.source))
+                            .font(.caption).foregroundStyle(color(for: item.source))
                         DisclosureGroup("Event details and source") {
                             VStack(alignment: .leading, spacing: 4) {
-                                Text("Source: \(providers.isEmpty ? "Unknown" : providers.joined(separator: ", "))")
-                                Text("Start: \(item.startsAt.formatted(date: .complete, time: .shortened))")
-                                Text("Time zone: \(item.timeZoneIdentifier)")
+                                Text("Source: \(item.source.label)")
+                                Text(item.isAllDay ? "All-day event" : "Start: \(item.start.formatted(date: .complete, time: .shortened))")
+                                Text("Time zone: \(item.timeZone)")
+                                if item.source == .appleCalendar {
+                                    Text("Personal Calendar details are kept private and are not stored by this app.")
+                                }
                                 if let record = item.sourceRecordIDs.first.flatMap({ sourceID in model.sourceRecords.first(where: { $0.id == sourceID }) }),
                                    let uri = record.sourceURI, let url = URL(string: uri) {
                                     Link("Open source", destination: url).padding(.top, 3)
@@ -400,6 +415,27 @@ struct ContentView: View {
                 .padding(14).background(.background, in: RoundedRectangle(cornerRadius: 10))
             }
         }
+    }
+
+    private func timelineEvents(in interval: DateInterval) -> [UnifiedTimelineEvent] {
+        model.timelineEvents.filter { $0.start < interval.end && $0.displayEnd > interval.start }
+    }
+
+    private func refreshAppleCalendarTimeline() {
+        guard model.dataMode == .live else { return }
+        let interval: DateInterval
+        switch calendarMode {
+        case .day:
+            let start = Calendar.current.startOfDay(for: selectedDate)
+            interval = DateInterval(start: start, end: Calendar.current.date(byAdding: .day, value: 1, to: start) ?? start)
+        case .week:
+            let range = weekRange(); interval = DateInterval(start: range.start, end: range.end)
+        case .month:
+            let components = Calendar.current.dateComponents([.year, .month], from: selectedDate)
+            let start = Calendar.current.date(from: components) ?? selectedDate
+            interval = DateInterval(start: start, end: Calendar.current.date(byAdding: .month, value: 1, to: start) ?? start)
+        }
+        model.appleCalendar.refreshTimeline(in: interval)
     }
 
     private var planView: some View {
@@ -658,8 +694,27 @@ struct ContentView: View {
     private func color(for kind: AcademicItemKind) -> Color {
         switch kind { case .classSession: .blue; case .tutorial: .purple; case .deadline: .orange; case .studyBlock: .teal }
     }
+    private func color(for source: UnifiedTimelineSource) -> Color {
+        switch source {
+        case .canvas: .blue
+        case .outlook: .purple
+        case .demonstration, .unknown: .secondary
+        case .appleCalendar: .orange
+        case .managedCalendar: .green
+        }
+    }
     private func icon(for kind: AcademicItemKind) -> String {
         switch kind { case .classSession: "book.closed.fill"; case .tutorial: "person.2.fill"; case .deadline: "exclamationmark.circle.fill"; case .studyBlock: "pencil.and.outline" }
+    }
+    private func sourceIcon(for source: UnifiedTimelineSource) -> String {
+        switch source {
+        case .canvas: "arrow.down.doc"
+        case .outlook: "envelope"
+        case .demonstration: "sparkles"
+        case .appleCalendar: "calendar.badge.clock"
+        case .managedCalendar: "calendar.badge.checkmark"
+        case .unknown: "questionmark.circle"
+        }
     }
 }
 

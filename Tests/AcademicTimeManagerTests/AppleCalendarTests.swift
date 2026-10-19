@@ -3,6 +3,10 @@ import XCTest
 @testable import AcademicCore
 
 @MainActor private final class MockCalendar: AppleCalendarClient {
+    private final class Observation: AppleCalendarChangeObservation {
+        var cancelled = false
+        func cancel() { cancelled = true }
+    }
     var access: CalendarAccess = .fullAccess
     var values: [AppleCalendarEvent] = []
     var permissionRequests = 0
@@ -14,6 +18,7 @@ import XCTest
     var failBeforeWrite = false
     var failAfterWrite = false
     var onWrite: (() -> Void)?
+    var changeHandler: (@MainActor () -> Void)?
     func requestAccess() async throws { permissionRequests += 1 }
     func sources() throws -> [AppleCalendarSource] { [AppleCalendarSource(id: "local", title: "Test account")] }
     func createCalendar(sourceID: String) throws -> String { creates += 1; return "managed" }
@@ -24,6 +29,12 @@ import XCTest
         return values.filter { $0.start < interval.end && $0.end > interval.start }
     }
     func event(id: String) throws -> AppleCalendarEvent? { values.first { $0.id == id } }
+    func observeChanges(_ handler: @escaping @MainActor () -> Void) -> any AppleCalendarChangeObservation {
+        let observation = Observation()
+        changeHandler = { if !observation.cancelled { handler() } }
+        return observation
+    }
+    func notifyCalendarChanged() { changeHandler?() }
     func apply(before: AppleCalendarEvent?, after: AppleCalendarEvent?) throws -> AppleCalendarEvent? {
         if failBeforeWrite { throw AppleCalendarError.unavailable }
         writes += 1
@@ -415,6 +426,82 @@ final class AppleCalendarTests: XCTestCase {
             availability: availability, now: now, calendar: service)
         XCTAssertTrue(finished.schedule.blocks.isEmpty)
         XCTAssertEqual(service.managedEvents.count, combined.schedule.blocks.count, "Completion must not silently cancel published events")
+    }
+
+    @MainActor func testTimelineRedactsPersonalEventsAndExpandsAllDayAndRecurringOccurrences() throws {
+        let client = MockCalendar(); let storage = MemoryCalendarJournal(); let now = instant
+        let service = try AppleCalendarService(client: client, storage: storage, now: { now })
+        let interval = DateInterval(start: instant, end: instant.addingTimeInterval(4 * 86400))
+        let duplicateStart = instant.addingTimeInterval(3600)
+        client.values = [
+            AppleCalendarEvent(id: "duplicate", calendarID: "personal", marker: nil, title: "Linear Algebra",
+                start: duplicateStart, end: duplicateStart.addingTimeInterval(3600), timeZone: "Europe/London"),
+            AppleCalendarEvent(id: "all-day", calendarID: "personal", marker: nil, title: "Private leave",
+                start: instant.addingTimeInterval(86400), end: instant.addingTimeInterval(2 * 86400), timeZone: "Europe/London", isAllDay: true),
+            AppleCalendarEvent(id: "recurring", calendarID: "personal", marker: nil, title: "Private recurring",
+                start: instant.addingTimeInterval(2 * 86400), end: instant.addingTimeInterval(2 * 86400 + 1800), timeZone: "Europe/London"),
+            AppleCalendarEvent(id: "recurring", calendarID: "personal", marker: nil, title: "Private recurring",
+                start: instant.addingTimeInterval(3 * 86400), end: instant.addingTimeInterval(3 * 86400 + 1800), timeZone: "Europe/London"),
+            AppleCalendarEvent(id: "free", calendarID: "personal", marker: nil, title: "Free availability",
+                start: instant.addingTimeInterval(7200), end: instant.addingTimeInterval(10_800), timeZone: "Europe/London", isBusy: false)
+        ]
+        let projected = try service.timelineEvents(in: interval)
+        XCTAssertEqual(projected.count, 4)
+        XCTAssertTrue(projected.allSatisfy { $0.title == "Calendar commitment" && $0.source == .personal })
+        XCTAssertTrue(try XCTUnwrap(projected.first { $0.id.contains("all-day") }).isAllDay)
+        XCTAssertEqual(projected.filter { $0.id.contains("recurring") }.count, 2)
+        XCTAssertTrue(storage.value.records.isEmpty, "Reading personal events must not persist ownership or content")
+
+        let source = SourceRecord(id: "canvas-source", provider: "Canvas", externalID: "course", retrievedAt: now)
+        let imported = AcademicItem(id: "canvas-event", title: "Linear Algebra", startsAt: duplicateStart,
+            endsAt: duplicateStart.addingTimeInterval(3600), timeZoneIdentifier: "Europe/London", kind: .classSession,
+            verification: .verified, sourceRecordIDs: [source.id], isProtected: true)
+        let unified = UnifiedTimeline.events(academicItems: [imported], sources: [source], calendarEvents: projected)
+        XCTAssertEqual(unified.filter { $0.source == .appleCalendar && $0.start == duplicateStart }.count, 0)
+        XCTAssertEqual(unified.filter { $0.source == .canvas && $0.start == duplicateStart }.count, 1)
+        XCTAssertTrue(unified.filter { $0.source == .appleCalendar }.allSatisfy(\.isProtected))
+    }
+
+    @MainActor func testTimelineShowsOnlyOwnedManagedSessionsAndRefreshesOnCalendarChange() throws {
+        let (service, client, storage) = try setup()
+        try service.approve(preview(service))
+        let range = DateInterval(start: instant, end: instant.addingTimeInterval(86400))
+        let first = try service.timelineEvents(in: range)
+        XCTAssertEqual(first.count, 1)
+        XCTAssertEqual(first[0].source, .managed)
+        XCTAssertEqual(first[0].title, "Study")
+        XCTAssertEqual(storage.value.records.count, 1)
+
+        var changes = 0
+        let observer = try service.observeChanges { changes += 1 }
+        client.notifyCalendarChanged()
+        XCTAssertEqual(changes, 1)
+        observer.cancel()
+        client.notifyCalendarChanged()
+        XCTAssertEqual(changes, 1)
+
+        var personal = client.values[0]
+        personal.id = "personal-in-managed-calendar"; personal.marker = nil; personal.title = "Personal title"
+        client.values.append(personal)
+        let refreshed = try service.timelineEvents(in: range)
+        XCTAssertEqual(refreshed.filter { $0.source == .managed }.count, 1)
+        XCTAssertEqual(refreshed.filter { $0.source == .personal }.map(\.title), ["Calendar commitment"])
+        XCTAssertEqual(storage.value.records.count, 1, "A personal event never gains managed ownership")
+    }
+
+    func testExistingOwnershipJournalDecodesWithoutAllDayTimelineMetadata() throws {
+        let oldJournal: [String: Any] = [
+            "calendarID": "managed",
+            "records": ["slot": [
+                "id": "event", "calendarID": "managed", "marker": "marker", "title": "Study",
+                "start": instant.timeIntervalSinceReferenceDate,
+                "end": instant.addingTimeInterval(3600).timeIntervalSinceReferenceDate,
+                "timeZone": "Europe/London", "isBusy": true, "isSafeToModify": true
+            ]],
+            "pending": NSNull(), "pendingIsUndo": false, "undoHistory": [], "audit": []
+        ]
+        let data = try JSONSerialization.data(withJSONObject: oldJournal)
+        XCTAssertFalse(try XCTUnwrap(JSONDecoder().decode(CalendarJournal.self, from: data).records["slot"]).isAllDay)
     }
 
 }

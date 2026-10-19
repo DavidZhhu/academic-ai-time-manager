@@ -36,16 +36,59 @@ public struct AppleCalendarEvent: Codable, Equatable, Sendable, Identifiable {
     public var timeZone: String
     public var isBusy: Bool
     public var isSafeToModify: Bool
+    /// All-day is presentation metadata only. It is never used to authorize a mutation.
+    public var isAllDay: Bool
     public init(id: String, calendarID: String, marker: String?, title: String, start: Date, end: Date,
-                timeZone: String, isBusy: Bool = true, isSafeToModify: Bool = true) {
+                timeZone: String, isBusy: Bool = true, isSafeToModify: Bool = true, isAllDay: Bool = false) {
         self.id = id; self.calendarID = calendarID; self.marker = marker; self.title = title
         self.start = start; self.end = end; self.timeZone = timeZone; self.isBusy = isBusy
-        self.isSafeToModify = isSafeToModify
+        self.isSafeToModify = isSafeToModify; self.isAllDay = isAllDay
+    }
+    private enum CodingKeys: String, CodingKey {
+        case id, calendarID, marker, title, start, end, timeZone, isBusy, isSafeToModify, isAllDay
+    }
+    /// Journals written before Timeline support did not contain `isAllDay`.
+    public init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        id = try values.decode(String.self, forKey: .id)
+        calendarID = try values.decode(String.self, forKey: .calendarID)
+        marker = try values.decodeIfPresent(String.self, forKey: .marker)
+        title = try values.decode(String.self, forKey: .title)
+        start = try values.decode(Date.self, forKey: .start)
+        end = try values.decode(Date.self, forKey: .end)
+        timeZone = try values.decode(String.self, forKey: .timeZone)
+        isBusy = try values.decode(Bool.self, forKey: .isBusy)
+        isSafeToModify = try values.decode(Bool.self, forKey: .isSafeToModify)
+        isAllDay = try values.decodeIfPresent(Bool.self, forKey: .isAllDay) ?? false
     }
     func sameContent(as other: Self) -> Bool {
         var lhs = self; var rhs = other; lhs.id = ""; rhs.id = ""; return lhs == rhs
     }
 }
+
+/// A redacted, transient event for the unified Timeline. Calendar titles are retained only
+/// for app-owned sessions; personal event titles are represented by a process-local hash so
+/// exact duplicate imports can be hidden without persisting personal content.
+public struct AppleCalendarTimelineEvent: Equatable, Sendable, Identifiable {
+    public enum Source: String, Equatable, Sendable { case personal, managed }
+    public let id: String
+    public let title: String
+    public let start: Date
+    public let end: Date
+    public let timeZone: String
+    public let isAllDay: Bool
+    public let source: Source
+    public let titleHash: Int
+    public init(id: String, title: String, start: Date, end: Date, timeZone: String,
+                isAllDay: Bool, source: Source, titleHash: Int) {
+        self.id = id; self.title = title; self.start = start; self.end = end
+        self.timeZone = timeZone; self.isAllDay = isAllDay; self.source = source; self.titleHash = titleHash
+    }
+}
+
+/// Timeline refresh is deliberately available only after the user has refreshed a Calendar
+/// connection. It does not request authorization or grant any write capability.
+public protocol AppleCalendarChangeObservation: AnyObject { func cancel() }
 
 /// All calls are isolated to the main actor; test doubles never construct EKEventStore.
 @MainActor public protocol AppleCalendarClient: AnyObject {
@@ -57,6 +100,7 @@ public struct AppleCalendarEvent: Codable, Equatable, Sendable, Identifiable {
     func events(in interval: DateInterval) throws -> [AppleCalendarEvent]
     func event(id: String) throws -> AppleCalendarEvent?
     func apply(before: AppleCalendarEvent?, after: AppleCalendarEvent?) throws -> AppleCalendarEvent?
+    func observeChanges(_ handler: @escaping @MainActor () -> Void) -> any AppleCalendarChangeObservation
 }
 
 public struct CalendarChange: Codable, Equatable, Sendable, Identifiable {
@@ -146,6 +190,33 @@ public struct CalendarJournal: Codable, Sendable {
         try requireAccess(); try validate(interval)
         return try client.events(in: interval).filter { $0.isBusy && $0.end > $0.start }
             .map { DateInterval(start: $0.start, end: $0.end) }
+    }
+
+    /// Returns only busy calendar commitments. Personal titles and metadata remain in the
+    /// Calendar store: Timeline receives the generic label "Calendar commitment" instead.
+    public func timelineEvents(in interval: DateInterval) throws -> [AppleCalendarTimelineEvent] {
+        try requireAccess(); try validate(interval)
+        let owned = journal.records.values
+        var seen = Set<String>()
+        return try client.events(in: interval).compactMap { event in
+            guard event.isBusy, event.end > event.start else { return nil }
+            let occurrenceID = "\(event.id)|\(event.start.timeIntervalSinceReferenceDate)|\(event.end.timeIntervalSinceReferenceDate)"
+            guard seen.insert(occurrenceID).inserted else { return nil }
+            let isManaged = owned.contains { record in
+                record.id == event.id && record.marker == event.marker && event.isSafeToModify
+            }
+            let normalized = event.title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return AppleCalendarTimelineEvent(id: "apple-calendar:\(occurrenceID)",
+                title: isManaged ? event.title : "Calendar commitment", start: event.start, end: event.end,
+                timeZone: event.timeZone, isAllDay: event.isAllDay,
+                source: isManaged ? .managed : .personal, titleHash: normalized.hashValue)
+        }.sorted { $0.start == $1.start ? $0.id < $1.id : $0.start < $1.start }
+    }
+
+    public func observeChanges(_ handler: @escaping @MainActor () -> Void) throws -> any AppleCalendarChangeObservation {
+        try requireAccess()
+        return client.observeChanges(handler)
     }
 
     /// Identity is task + session ordinal, independent of the scheduler's timestamp-based IDs.

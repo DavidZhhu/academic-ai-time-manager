@@ -13,7 +13,11 @@ final class AppleCalendarViewModel {
     var owned: [(key: String, event: AppleCalendarEvent)] = []
     var hasPending = false
     var canUndo = false
+    /// Transient, redacted values for the Timeline. This is never saved to SQLite or the journal.
+    var timelineEvents: [AppleCalendarTimelineEvent] = []
     private var service: AppleCalendarService?
+    private var timelineInterval: DateInterval?
+    private var changeObservation: (any AppleCalendarChangeObservation)?
 
     private func connection() throws -> AppleCalendarService {
         if let service { return service }
@@ -37,11 +41,27 @@ final class AppleCalendarViewModel {
             if !sources.contains(where: { $0.id == selectedSource }) { selectedSource = sources.first?.id ?? "" }
             ready = service.calendarID != nil; reloadOwned(service)
             status = ready ? "Full access granted. The managed calendar is configured. Changes require a preview and your approval." : "Full access granted. Choose an account and create the dedicated calendar."
+            refreshTimeline(in: defaultTimelineInterval())
         } catch { failed(error) }
     }
     func createCalendar() {
         do { try connection().createCalendar(sourceID: selectedSource, approved: true); refresh() }
         catch { failed(error) }
+    }
+    func refreshTimeline(in interval: DateInterval) {
+        guard let service else { return }
+        do {
+            timelineEvents = try service.timelineEvents(in: interval)
+            timelineInterval = interval
+            if changeObservation == nil {
+                changeObservation = try service.observeChanges { [weak self] in
+                    self?.refreshObservedTimeline()
+                }
+            }
+        } catch {
+            timelineEvents = []
+            if service.access != .fullAccess { failed(error) }
+        }
     }
     func makePlan(dataset: AcademicDataset, progress: [String: AssignmentProgress], availability: AvailabilitySettings,
                   estimates: [String: Int], priorities: [String: Int], now: Date) throws -> AssignmentStudyPlan {
@@ -70,6 +90,7 @@ final class AppleCalendarViewModel {
         do {
             let service = try connection(); try service.approve(preview); reloadOwned(service)
             status = "Approved changes saved to the local Calendar store. Account syncing is handled by macOS; remote delivery is not confirmed."
+            if let timelineInterval { refreshTimeline(in: timelineInterval) }
         } catch { failed(error) }
     }
     func undo() {
@@ -78,8 +99,21 @@ final class AppleCalendarViewModel {
         catch { failed(error) }
     }
     func recover() {
-        do { let service = try connection(); try service.recoverPendingWrite(); reloadOwned(service); status = "Pending write reconciled. Generate and review a fresh proposal before publishing again." }
+        do {
+            let service = try connection(); try service.recoverPendingWrite(); reloadOwned(service)
+            status = "Pending write reconciled. Generate and review a fresh proposal before publishing again."
+            if let timelineInterval { refreshTimeline(in: timelineInterval) }
+        }
         catch { failed(error) }
+    }
+    private func refreshObservedTimeline() {
+        guard let timelineInterval else { return }
+        refreshTimeline(in: timelineInterval)
+    }
+    private func defaultTimelineInterval() -> DateInterval {
+        let start = Calendar.current.startOfDay(for: Date())
+        let end = Calendar.current.date(byAdding: .day, value: 365, to: start) ?? start.addingTimeInterval(365 * 86400)
+        return DateInterval(start: start, end: end)
     }
     private func reloadOwned(_ service: AppleCalendarService) {
         owned = service.managedKeys().compactMap { key in service.event(for: key).map { (key, $0) } }
@@ -88,7 +122,13 @@ final class AppleCalendarViewModel {
     private func failed(_ error: Error) {
         invalidate(); status = ((error as? AppleCalendarError)?.localizedDescription ?? AppleCalendarError.unavailable.localizedDescription)
             + " Earlier confirmed changes, if any, remain saved; inspect Published study sessions before continuing."
-        if let service { reloadOwned(service); if service.access != .fullAccess { ready = false; sources = [] } }
+        if let service {
+            reloadOwned(service)
+            if service.access != .fullAccess {
+                ready = false; sources = []; timelineEvents = []; timelineInterval = nil
+                changeObservation?.cancel(); changeObservation = nil
+            }
+        }
     }
 }
 
@@ -97,9 +137,13 @@ struct AppleCalendarConnectionView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Apple Calendar", systemImage: "calendar").font(.headline)
-            Text("Full Calendar access lets this app read busy times across your calendars and save only approved study sessions in Academic AI Time Manager. Personal event details remain on this Mac. Connecting does not publish a plan.")
+            Text("Full Calendar access lets this app read busy times across your calendars and show protected Calendar commitments in Timeline. Personal titles, notes, attendees and locations are not retained. Only approved study sessions are saved in Academic AI Time Manager.")
                 .font(.callout).foregroundStyle(.secondary)
             Text(model.status).textSelection(.enabled)
+            if !model.timelineEvents.isEmpty {
+                Text("Timeline is showing \(model.timelineEvents.count) protected Apple Calendar commitment\(model.timelineEvents.count == 1 ? "" : "s") for the selected range.")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
             HStack {
                 Button("Request Calendar access…") { Task { await model.requestPermission() } }.disabled(model.working)
                 Button("Refresh connection") { model.refresh() }.disabled(model.working)

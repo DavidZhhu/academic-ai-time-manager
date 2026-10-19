@@ -1,6 +1,20 @@
 import EventKit
 import Foundation
 
+private final class EventKitChangeObservation: AppleCalendarChangeObservation {
+    private var token: NSObjectProtocol?
+    init(store: EKEventStore, handler: @escaping @MainActor () -> Void) {
+        token = NotificationCenter.default.addObserver(forName: .EKEventStoreChanged, object: store, queue: .main) { _ in
+            Task { @MainActor in handler() }
+        }
+    }
+    func cancel() {
+        if let token { NotificationCenter.default.removeObserver(token) }
+        token = nil
+    }
+    deinit { cancel() }
+}
+
 /// Constructing this adapter does not instantiate EventKit or request permissions.
 @MainActor public final class EventKitCalendarClient: AppleCalendarClient {
     public static let calendarTitle = "Academic AI Time Manager"
@@ -57,6 +71,10 @@ import Foundation
     public func event(id: String) throws -> AppleCalendarEvent? {
         try requireAccess(); return store.event(withIdentifier: id).map(snapshot)
     }
+    public func observeChanges(_ handler: @escaping @MainActor () -> Void) -> any AppleCalendarChangeObservation {
+        // The EventKit store is created only after the user has explicitly refreshed a granted connection.
+        EventKitChangeObservation(store: store, handler: handler)
+    }
     public func apply(before: AppleCalendarEvent?, after: AppleCalendarEvent?) throws -> AppleCalendarEvent? {
         try requireAccess()
         guard let desired = after ?? before else { throw AppleCalendarError.invalidPlan }
@@ -97,6 +115,7 @@ import Foundation
         return AppleCalendarEvent(id: event.eventIdentifier ?? event.calendarItemIdentifier,
             calendarID: event.calendar.calendarIdentifier, marker: marker, title: event.title ?? "Busy",
             start: event.startDate, end: event.endDate, timeZone: event.timeZone?.identifier ?? "",
-            isBusy: event.availability != .free && event.status != .canceled, isSafeToModify: safe)
+            isBusy: event.availability != .free && event.status != .canceled, isSafeToModify: safe,
+            isAllDay: event.isAllDay)
     }
 }

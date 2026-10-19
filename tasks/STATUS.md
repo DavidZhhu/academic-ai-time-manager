@@ -2,7 +2,31 @@
 
 Updated: 2026-10-19 (Europe/London)
 
-Current position: **M0–M1 complete; Canvas sync, local completion tracking, demo/live separation, Microsoft Outlook integration, and Apple Calendar publication are integrated on main and verified with fixtures. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
+Current position: **M0–M1 complete; Canvas sync, local completion tracking, demo/live separation, Microsoft Outlook integration, and unified Apple Calendar Timeline display are integrated on main and verified with fixtures. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
+
+## Latest task — unified Apple Calendar Timeline (2026-10-19)
+
+### Delivered behavior
+
+- Live Timeline now combines Oxford Canvas records, approved Outlook events, and busy Apple Calendar occurrences in Day, Week, and Month views. Calendar entries are orange and labelled **Apple Calendar**; app-owned study sessions are green and labelled **Academic AI Time Manager calendar**. Canvas remains blue, Outlook purple, and demonstrations muted.
+- External Calendar occurrences are presented as protected **Calendar commitment** entries. The app redacts all personal titles, notes, locations, attendees, URLs, calendar/account names and other personal metadata. It never writes these events to SQLite, source records, review data, analysis inputs, or the ownership journal.
+- Only events already proven journal-owned by their UUID marker and exact saved record display their study title and remain eligible for the existing preview/approval/cancel/undo path. Other events, including personal events placed in the dedicated calendar, remain read-only.
+- The Timeline uses overlap-based date selection, so all-day and multi-day entries appear in every affected Day, Week, and Month. EventKit supplies recurring occurrences within the selected range; each occurrence has an in-memory start/end-specific identity. Free/canceled items are omitted, preserving the existing busy-time conflict policy.
+- An exact same-title/time Canvas or Outlook mirror collapses to the imported academic item. Duplicate detection uses a process-local normalized title hash for the redacted Calendar entry and never persists raw personal content. Calendar change notifications reload the active visible range after the user has explicitly refreshed a full-access connection. The app still does not access EventKit at launch.
+- Existing scheduling constraints, Canvas synchronization, assignment completion state, demonstration isolation, Calendar approval and recovery rules are unchanged. No Apple Calendar event is modified, deleted, rescheduled, or imported into persistent storage by Timeline refresh.
+
+### Tests and build status
+
+- Debug suite: **113 tests passed, 0 failures**. It includes two new mocked Calendar Timeline tests for privacy redaction, Canvas deduplication, protected state, all-day entries, recurring occurrences, owned-session distinction, notification observation, and no journal persistence for personal events.
+- Release suite: **114 tests passed, 0 failures**. Packaging succeeded through `scripts/package-macos.sh`; ad-hoc signing, strict deep signature verification and plist validation passed for the arm64 bundle. Latest runnable app: [`build-output/AcademicTimeManager.app`](/Users/davidzhu/Desktop/academic-time-manager/build-output/AcademicTimeManager.app).
+- Tests construct only injected mock Calendar clients and temporary stores; no EventKit store, permission prompt, Canvas, Outlook, credential, or production database was accessed. The app was not launched during this development run.
+
+### User verification after rebuilding
+
+1. Open the rebuilt app, go to **Connections → Apple Calendar**, and select **Refresh connection** after granting full access yourself. This is the only action that begins Timeline reads.
+2. Return to **Timeline**. Check Day, Week, and Month views: existing busy events should appear as orange, protected **Calendar commitment** entries without personal titles. App-owned study sessions should be green.
+3. Change or add a test Calendar event and return to the current Timeline range; EventKit change notifications should refresh the displayed commitments. Confirm free events do not appear or block time.
+4. Use only a test calendar and synthetic future work for the existing preview/approval flow. Timeline refresh does not authorize any personal-event change.
 
 ## Latest task — integrate Apple Calendar into main (2026-10-19)
 
@@ -37,7 +61,7 @@ Current position: **M0–M1 complete; Canvas sync, local completion tracking, de
 - No unresolved merge conflict, failing test, or build/package blocker remains. M2/M4/M5 remain partial pending live acceptance and existing hardening work; this integration does not claim complete MVP acceptance.
 - Live Microsoft login/consent and macOS Calendar permission/account behavior remain untested. Open the rebuilt main-project bundle after quitting other copies. Check that all three Connections panels scroll correctly in normal/full-screen windows, and cached Canvas data/completion choices remain visible. Connecting accounts or requesting Calendar access is up to the user.
 - For Calendar acceptance, follow `docs/APPLE_CALENDAR.md` with synthetic future work and a dedicated test calendar. Preview/dismiss first, then explicitly approve a small plan; verify repeat publication, cancellation and undo. Do not run multiple copies against the ownership journal concurrently.
-- Personal Calendar events constrain planning but are not imported into Timeline. Published sessions are listed in Connections and Apple Calendar. Published sessions remain until explicitly canceled even if their assignment is completed or omitted from a new proposal.
+- Personal Calendar events constrain planning and now appear as redacted, transient Timeline commitments after a user refresh. Published sessions remain until explicitly canceled even if their assignment is completed or omitted from a new proposal.
 - Remote Calendar propagation is not confirmed by local EventKit saves. Uncertain writes deliberately block retries pending read-only recovery. Existing limits include no Developer ID/notarization, no multi-process journal coordination, conservative email extraction and user-led visual checks.
 - Historical reports below describe their original branch/session state; this integration section supersedes earlier “unmerged,” “unimplemented,” and old application-path statements.
 
@@ -202,9 +226,9 @@ A related availability bug constructed a reversed date interval when today's stu
 |---|---|---|
 | M0 — Architecture and scaffolding | Complete | Weighted stack decision, native Swift app shell, project setup, feasibility review. |
 | M1 — Local app and canonical model | Complete | SQLite persistence, provenance, demo timeline, review decisions, availability settings. |
-| M2 — Account integrations | Partial | Oxford Canvas read-only sync is implemented and mock-tested. Microsoft Graph multi-account PKCE/Inbox delta/local analysis/batch review is implemented with mocks; real login awaits user setup. EventKit authorization, discovery, busy constraints, and approved publication are implemented with mocks; no real account or permission prompt was used. |
+| M2 — Account integrations | Partial | Oxford Canvas read-only sync is implemented and mock-tested. Microsoft Graph multi-account PKCE/Inbox delta/local analysis/batch review is implemented with mocks; real login awaits user setup. EventKit authorization, busy constraints, transient redacted Timeline display, and approved publication are implemented with mocks; no real account or permission prompt was used. |
 | M3 — Academic intelligence | Partial | Provider-independent interfaces and validation exist. Local email/attachment extraction, editable estimates, and deterministic stages are implemented; no cloud/general-language inference provider is active. |
-| M4 — Scheduling and calendar | Partial | Day/week/month calendar UI and deterministic local proposals are implemented. EventKit preview/approval, safe publication, cancellation, undo and ownership audit are wired. End-to-end live acceptance and unified Calendar event import remain unverified. |
+| M4 — Scheduling and calendar | Partial | Day/week/month unified calendar UI and deterministic local proposals are implemented. EventKit preview/approval, safe publication, cancellation, undo, ownership audit, transient personal-commitment display and refresh are wired. End-to-end live acceptance remains unverified. |
 
 | M5 — Hardening and packaging | Partial | Debug/release suites pass; local ad-hoc-signed app bundle builds. No notarization, Developer ID signing, or in-app visual smoke test. |
 
@@ -253,7 +277,7 @@ The implementation performs an idempotent local merge using stable provider/exte
 - The user's supplied screenshot shows a successful user-initiated Oxford Canvas sync. No live account verification or sync was performed by the development agent. Permission scopes and token policy remain user/institution choices.
 - No visual UI check was performed in a launched app. Confirm the new calendar layouts at normal/full-screen sizes and inspect the Connections scroll behavior manually.
 - Microsoft Graph needs user-supplied app registration/client ID, registered redirect URI, tenant consent where required, and interactive login verification. OAuth, read-only mail sync, local classification/attachment extraction, and batch review are implemented and mock-tested.
-- EventKit permission handling, busy-time discovery, managed-calendar setup, preview/approval, duplicate-safe writes, cancellation, recovery and undo are integrated and mock-tested. Live permission/account behavior and unified Timeline import of personal Calendar events remain unverified. No permission was requested and no calendar was changed during development.
+- EventKit permission handling, busy-time discovery, managed-calendar setup, preview/approval, duplicate-safe writes, cancellation, recovery, undo, and redacted Timeline display are integrated and mock-tested. Live permission/account behavior and Timeline refresh from a real Calendar remain unverified. No permission was requested and no calendar was changed during development.
 - General-language AI inference remains unavailable. Email date extraction is deterministic and conservative; automatic effort estimation remains unimplemented.
 - Study proposals remain transient. Calendar publication has exact-preview approval and a persistent ownership/audit/undo journal; estimates and full proposal history are not persisted.
 - SQLite application data is not encrypted at the application layer; retention and user deletion controls remain future hardening work.
