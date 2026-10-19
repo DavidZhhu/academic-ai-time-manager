@@ -113,7 +113,7 @@ private final class EventKitChangeObservation: AppleCalendarChangeObservation {
             && !event.hasAttendees && !event.hasAlarms && event.location == nil
             && event.status != .canceled && event.structuredLocation == nil
         return AppleCalendarEvent(id: event.eventIdentifier ?? event.calendarItemIdentifier,
-            calendarID: event.calendar.calendarIdentifier, marker: marker, title: event.title ?? "Busy",
+            calendarID: event.calendar.calendarIdentifier, marker: marker, title: event.title ?? "",
             start: event.startDate, end: event.endDate, timeZone: event.timeZone?.identifier ?? "",
             isBusy: event.availability != .free && event.status != .canceled, isSafeToModify: safe,
             isAllDay: event.isAllDay)

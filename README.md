@@ -45,7 +45,7 @@ Only unfinished assignments with future deadlines receive new study sessions. Pa
 
 When ready to test, open **Connections → Apple Calendar**, explicitly request Calendar access, select an account, and approve creation of the dedicated **Academic AI Time Manager** calendar. Generate a live plan, select **Preview Apple Calendar changes**, then approve the exact changes. Previewing alone makes no writes. Demo plans cannot be published.
 
-Connections also offers previewed cancellation and undo of the last event change. After restarting, use **Refresh connection** before calendar-aware planning and Timeline display. Busy personal events appear in Timeline as orange, protected **Calendar commitment** entries; their titles, notes, locations and attendees are not retained. Green entries are study sessions owned by the app. Only owned study sessions can be changed. See [Apple Calendar integration](docs/APPLE_CALENDAR.md) for recovery limits and the user-led test-account checklist. No real calendar was accessed during development.
+Connections also offers previewed cancellation and undo of the last event change. After restarting, use **Refresh connection** before calendar-aware planning and Timeline display. Busy personal events appear in Timeline as orange, protected **Apple Calendar** entries with their original title. The title remains only in local transient memory; notes, locations, attendees and URLs are not retained. Green entries are study sessions owned by the app. Only owned study sessions can be changed. See [Apple Calendar integration](docs/APPLE_CALENDAR.md) for recovery limits and the user-led test-account checklist. No real calendar was accessed during development.
 
 ## Project map
 - `AGENTS.md` — Codex execution contract.

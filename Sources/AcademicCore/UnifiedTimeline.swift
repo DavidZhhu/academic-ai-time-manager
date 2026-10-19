@@ -55,7 +55,7 @@ public enum UnifiedTimeline {
         let academicKeys = Set(academic.map { duplicateKey(title: $0.title, start: $0.start, end: $0.end) })
         let calendar = calendarEvents.compactMap { event -> UnifiedTimelineEvent? in
             // A busy personal Calendar event that exactly mirrors an imported event stays a single
-            // Timeline row. Its raw title has already been reduced to a per-process hash.
+            // Timeline row. Its transient title hash is used only for this in-memory comparison.
             if event.source == .personal,
                academicKeys.contains(duplicateKey(titleHash: event.titleHash, start: event.start, end: event.end)) {
                 return nil

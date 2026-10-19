@@ -428,7 +428,7 @@ final class AppleCalendarTests: XCTestCase {
         XCTAssertEqual(service.managedEvents.count, combined.schedule.blocks.count, "Completion must not silently cancel published events")
     }
 
-    @MainActor func testTimelineRedactsPersonalEventsAndExpandsAllDayAndRecurringOccurrences() throws {
+    @MainActor func testTimelineKeepsPersonalTitlesAndExpandsAllDayAndRecurringOccurrences() throws {
         let client = MockCalendar(); let storage = MemoryCalendarJournal(); let now = instant
         let service = try AppleCalendarService(client: client, storage: storage, now: { now })
         let interval = DateInterval(start: instant, end: instant.addingTimeInterval(4 * 86400))
@@ -447,7 +447,8 @@ final class AppleCalendarTests: XCTestCase {
         ]
         let projected = try service.timelineEvents(in: interval)
         XCTAssertEqual(projected.count, 4)
-        XCTAssertTrue(projected.allSatisfy { $0.title == "Calendar commitment" && $0.source == .personal })
+        XCTAssertEqual(projected.map(\.title), ["Linear Algebra", "Private leave", "Private recurring", "Private recurring"])
+        XCTAssertTrue(projected.allSatisfy { $0.source == .personal })
         XCTAssertTrue(try XCTUnwrap(projected.first { $0.id.contains("all-day") }).isAllDay)
         XCTAssertEqual(projected.filter { $0.id.contains("recurring") }.count, 2)
         XCTAssertTrue(storage.value.records.isEmpty, "Reading personal events must not persist ownership or content")
@@ -460,6 +461,23 @@ final class AppleCalendarTests: XCTestCase {
         XCTAssertEqual(unified.filter { $0.source == .appleCalendar && $0.start == duplicateStart }.count, 0)
         XCTAssertEqual(unified.filter { $0.source == .canvas && $0.start == duplicateStart }.count, 1)
         XCTAssertTrue(unified.filter { $0.source == .appleCalendar }.allSatisfy(\.isProtected))
+    }
+
+    @MainActor func testTimelineUsesLocalFallbackForMissingPersonalTitleWithoutPersistingIt() throws {
+        let client = MockCalendar(); let storage = MemoryCalendarJournal(); let now = instant
+        let service = try AppleCalendarService(client: client, storage: storage, now: { now })
+        let interval = DateInterval(start: instant, end: instant.addingTimeInterval(3600))
+        client.values = [
+            AppleCalendarEvent(id: "untitled", calendarID: "personal", marker: nil, title: "   ",
+                start: instant, end: instant.addingTimeInterval(1800), timeZone: "Europe/London")
+        ]
+
+        let projected = try service.timelineEvents(in: interval)
+
+        XCTAssertEqual(projected.map(\.title), ["Untitled Calendar event"])
+        XCTAssertEqual(projected.first?.source, .personal)
+        XCTAssertTrue(storage.value.records.isEmpty)
+        XCTAssertEqual(client.writes, 0)
     }
 
     @MainActor func testTimelineShowsOnlyOwnedManagedSessionsAndRefreshesOnCalendarChange() throws {
@@ -485,7 +503,7 @@ final class AppleCalendarTests: XCTestCase {
         client.values.append(personal)
         let refreshed = try service.timelineEvents(in: range)
         XCTAssertEqual(refreshed.filter { $0.source == .managed }.count, 1)
-        XCTAssertEqual(refreshed.filter { $0.source == .personal }.map(\.title), ["Calendar commitment"])
+        XCTAssertEqual(refreshed.filter { $0.source == .personal }.map(\.title), ["Personal title"])
         XCTAssertEqual(storage.value.records.count, 1, "A personal event never gains managed ownership")
     }
 

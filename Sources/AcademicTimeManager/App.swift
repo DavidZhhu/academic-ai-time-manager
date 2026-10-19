@@ -402,7 +402,7 @@ struct ContentView: View {
                                 Text(item.isAllDay ? "All-day event" : "Start: \(item.start.formatted(date: .complete, time: .shortened))")
                                 Text("Time zone: \(item.timeZone)")
                                 if item.source == .appleCalendar {
-                                    Text("Personal Calendar details are kept private and are not stored by this app.")
+                                    Text("The event title is displayed locally. Notes, attendees, locations and URLs are kept private and are not stored by this app.")
                                 }
                                 if let record = item.sourceRecordIDs.first.flatMap({ sourceID in model.sourceRecords.first(where: { $0.id == sourceID }) }),
                                    let uri = record.sourceURI, let url = URL(string: uri) {

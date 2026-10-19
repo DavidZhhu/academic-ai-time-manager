@@ -66,9 +66,10 @@ public struct AppleCalendarEvent: Codable, Equatable, Sendable, Identifiable {
     }
 }
 
-/// A redacted, transient event for the unified Timeline. Calendar titles are retained only
-/// for app-owned sessions; personal event titles are represented by a process-local hash so
-/// exact duplicate imports can be hidden without persisting personal content.
+/// A transient event for the unified Timeline. A Calendar title is retained only in process
+/// memory so it can be rendered locally. The value is never written to SQLite, source records,
+/// review data, the ownership journal, or an analysis input. A process-local hash supports exact
+/// duplicate suppression without a second persistent copy of the title.
 public struct AppleCalendarTimelineEvent: Equatable, Sendable, Identifiable {
     public enum Source: String, Equatable, Sendable { case personal, managed }
     public let id: String
@@ -192,8 +193,9 @@ public struct CalendarJournal: Codable, Sendable {
             .map { DateInterval(start: $0.start, end: $0.end) }
     }
 
-    /// Returns only busy calendar commitments. Personal titles and metadata remain in the
-    /// Calendar store: Timeline receives the generic label "Calendar commitment" instead.
+    /// Returns only busy calendar occurrences for local Timeline rendering. Personal titles are
+    /// transient display values; Calendar metadata other than the title, time range, timezone,
+    /// all-day flag, source classification, and duplicate hash is not projected.
     public func timelineEvents(in interval: DateInterval) throws -> [AppleCalendarTimelineEvent] {
         try requireAccess(); try validate(interval)
         let owned = journal.records.values
@@ -207,8 +209,11 @@ public struct CalendarJournal: Codable, Sendable {
             }
             let normalized = event.title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
+            let title = normalized.isEmpty
+                ? (isManaged ? "Untitled study session" : "Untitled Calendar event")
+                : event.title
             return AppleCalendarTimelineEvent(id: "apple-calendar:\(occurrenceID)",
-                title: isManaged ? event.title : "Calendar commitment", start: event.start, end: event.end,
+                title: title, start: event.start, end: event.end,
                 timeZone: event.timeZone, isAllDay: event.isAllDay,
                 source: isManaged ? .managed : .personal, titleHash: normalized.hashValue)
         }.sorted { $0.start == $1.start ? $0.id < $1.id : $0.start < $1.start }

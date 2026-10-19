@@ -137,11 +137,11 @@ struct AppleCalendarConnectionView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label("Apple Calendar", systemImage: "calendar").font(.headline)
-            Text("Full Calendar access lets this app read busy times across your calendars and show protected Calendar commitments in Timeline. Personal titles, notes, attendees and locations are not retained. Only approved study sessions are saved in Academic AI Time Manager.")
+            Text("Full Calendar access lets this app read busy times across your calendars and show protected Calendar events in Timeline. Event titles are displayed only locally; notes, attendees, locations and URLs are not retained. Only approved study sessions are saved in Academic AI Time Manager.")
                 .font(.callout).foregroundStyle(.secondary)
             Text(model.status).textSelection(.enabled)
             if !model.timelineEvents.isEmpty {
-                Text("Timeline is showing \(model.timelineEvents.count) protected Apple Calendar commitment\(model.timelineEvents.count == 1 ? "" : "s") for the selected range.")
+                Text("Timeline is showing \(model.timelineEvents.count) protected Apple Calendar event\(model.timelineEvents.count == 1 ? "" : "s") for the selected range.")
                     .font(.caption).foregroundStyle(.secondary)
             }
             HStack {
