@@ -4,6 +4,21 @@ Updated: 2026-10-19 (Europe/London)
 
 Current position: **M0–M1 complete; Canvas sync, local completion tracking, demo/live separation, Microsoft Outlook integration, and unified Apple Calendar Timeline display are integrated on main and verified with fixtures. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
 
+## Latest task — GitHub Actions Swift generic-decoding compatibility (2026-10-19)
+
+### Finding and change
+
+- `.github/workflows/ci.yml` runs `swift test` on unpinned `macos-latest`; `Package.swift` declares Swift tools version 6.0. The CI compiler reported that `readJSON<T: Decodable>(_:).first` did not constrain `T` in `lastSuccessfulCanvasSync()` and `outlookState()`.
+- Those readers now assign the query result to concrete `[Date]` and `[OutlookState]` values before taking `.first`. The adjacent `availabilitySettings()` reader now follows the same explicit `[AvailabilitySettings]` pattern. JSON keys, SQL queries, missing-row defaults, and persistence behavior are unchanged.
+- Added a regression test for empty and persisted Canvas-sync and Outlook-state settings. It confirms the `nil` and `OutlookState()` defaults as well as round-tripped values.
+
+### Verification
+
+- Debug: `swift test --disable-sandbox` — **119 passed, 0 failures**.
+- Release: `swift test -c release --disable-sandbox` — **119 passed, 0 failures**.
+- Verified with Apple Swift 6.4 locally. The ordinary sandboxed SwiftPM invocation was blocked before compilation by compiler-cache permissions; disabling the package sandbox allowed the unchanged fixture-only suite to compile and run. `git diff --check` passes.
+- No signing identity, credential, permission, database schema, network integration, or calendar behavior changed.
+
 ## Latest task — stable development signing for Calendar permission persistence (2026-10-19)
 
 ### Root cause and investigation
