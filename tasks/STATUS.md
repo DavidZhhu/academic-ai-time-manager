@@ -4,6 +4,14 @@ Updated: 2026-10-19 (Europe/London)
 
 Current position: **M0–M1 complete; Canvas sync, local completion tracking, demo/live separation, Microsoft Outlook integration, and unified Apple Calendar Timeline display are integrated on main and verified with fixtures. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
 
+## Current task — custom macOS application icon (2026-10-19)
+
+Expected behavior: packaging a square, tracked `AcademicTimeManagerIcon.png` produces all standard macOS icon representations without stretching or cropping the artwork, embeds `AcademicTimeManager.icns` under `Contents/Resources`, and records it in `CFBundleIconFile`. The existing bundle identifier, Apple Development signing workflow, Keychain compatibility, and Calendar permission behavior remain unchanged.
+
+Delivered on `feature/custom-app-icon`: the original 1254×1254 artwork is tracked at `Sources/AcademicTimeManager/Resources/AcademicTimeManagerIcon.png`; packaging uses `sips` to create 16, 32, 128, 256, 512, and 1024 pixel iconset representations, then uses Apple's `iconutil` to create `AcademicTimeManager.icns`. The package verifier confirms every 1×/2× representation after re-expanding the `.icns`, the `CFBundleIconFile` declaration, and the bundled resource before its existing strict signature checks.
+
+Verification: debug and release `swift test` each passed **118 tests, 0 failures**. The rebuilt `build-output/AcademicTimeManager.app` contains `Contents/Resources/AcademicTimeManager.icns`, declares that file in `Info.plist`, and passed strict/deep, Apple-anchored stable-signature validation with the unchanged `org.example.AcademicTimeManager` identifier. No app was launched, and no Calendar, Keychain item, account, or personal data was accessed. The source artwork is user-supplied and has no embedded credentials or account data.
+
 ## Latest task — stable development signing for Calendar permission persistence (2026-10-19)
 
 ### Root cause and investigation

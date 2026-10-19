@@ -6,6 +6,35 @@ CONTENTS_PATH="$APP_PATH/Contents"
 EXECUTABLE_PATH="$CONTENTS_PATH/MacOS"
 BUILD_ROOT="${ACADEMIC_SWIFT_SCRATCH_PATH:-.build}"
 BUNDLE_IDENTIFIER="org.example.AcademicTimeManager"
+ICON_SOURCE_PATH="Sources/AcademicTimeManager/Resources/AcademicTimeManagerIcon.png"
+ICON_FILE_NAME="AcademicTimeManager.icns"
+
+create_app_icon() {
+    if [ ! -f "$ICON_SOURCE_PATH" ]; then
+        printf 'Application icon source is missing: %s\n' "$ICON_SOURCE_PATH" >&2
+        exit 1
+    fi
+
+    ICON_WIDTH=$(/usr/bin/sips -g pixelWidth "$ICON_SOURCE_PATH" | /usr/bin/awk '/pixelWidth:/{print $2}')
+    ICON_HEIGHT=$(/usr/bin/sips -g pixelHeight "$ICON_SOURCE_PATH" | /usr/bin/awk '/pixelHeight:/{print $2}')
+    if [ -z "$ICON_WIDTH" ] || [ -z "$ICON_HEIGHT" ] || [ "$ICON_WIDTH" -ne "$ICON_HEIGHT" ]; then
+        printf 'Application icon source must be square; refusing to stretch or crop it.\n' >&2
+        exit 1
+    fi
+
+    ICON_TEMPORARY_PATH=$(/usr/bin/mktemp -d "${TMPDIR:-/tmp}/AcademicTimeManager-icon.XXXXXX")
+    ICONSET_PATH="$ICON_TEMPORARY_PATH/AcademicTimeManager.iconset"
+    mkdir "$ICONSET_PATH"
+    trap 'rm -rf "$ICON_TEMPORARY_PATH"' EXIT HUP INT TERM
+    for ICON_SIZE in 16 32 128 256 512; do
+        /usr/bin/sips -z "$ICON_SIZE" "$ICON_SIZE" "$ICON_SOURCE_PATH" --out "$ICONSET_PATH/icon_${ICON_SIZE}x${ICON_SIZE}.png" >/dev/null
+        DOUBLE_SIZE=$((ICON_SIZE * 2))
+        /usr/bin/sips -z "$DOUBLE_SIZE" "$DOUBLE_SIZE" "$ICON_SOURCE_PATH" --out "$ICONSET_PATH/icon_${ICON_SIZE}x${ICON_SIZE}@2x.png" >/dev/null
+    done
+
+    mkdir -p "$CONTENTS_PATH/Resources"
+    /usr/bin/iconutil -c icns "$ICONSET_PATH" -o "$CONTENTS_PATH/Resources/$ICON_FILE_NAME"
+}
 
 select_signing_identity() {
     if [ "${ACADEMIC_ADHOC_SIGNING:-0}" = "1" ]; then
@@ -53,6 +82,7 @@ else
 fi
 mkdir -p "$EXECUTABLE_PATH"
 cp "$PRODUCT_PATH" "$EXECUTABLE_PATH/AcademicTimeManager"
+create_app_icon
 cat > "$CONTENTS_PATH/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -60,6 +90,7 @@ cat > "$CONTENTS_PATH/Info.plist" <<'PLIST'
 <dict>
     <key>CFBundleExecutable</key><string>AcademicTimeManager</string>
     <key>CFBundleIdentifier</key><string>org.example.AcademicTimeManager</string>
+    <key>CFBundleIconFile</key><string>AcademicTimeManager.icns</string>
     <key>CFBundleName</key><string>Academic Time Manager</string>
     <key>CFBundlePackageType</key><string>APPL</string>
     <key>CFBundleShortVersionString</key><string>0.1.0</string>
