@@ -1,0 +1,3 @@
+Apple Calendar access is requested only from Connections at the user's direction.
+Only explicitly approved study sessions are written to the dedicated calendar.
+Personal calendar events are read locally for conflict detection and are never sent to AI providers.

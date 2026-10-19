@@ -9,6 +9,9 @@ struct AcademicTimeManagerApp: App {
         WindowGroup {
             ContentView(model: model)
                 .frame(minWidth: 820, minHeight: 620)
+                .sheet(isPresented: Binding(get: { model.appleCalendar.preview != nil }, set: { if !$0 { model.appleCalendar.invalidate() } })) {
+                    AppleCalendarPreviewView(model: model.appleCalendar)
+                }
         }
         .windowStyle(.hiddenTitleBar)
     }
@@ -21,8 +24,9 @@ final class PlannerViewModel {
     var reviews: [ReviewItem] = []
     var sourceRecords: [SourceRecord] = []
     var conflicts: [AcademicConflict] = []
-    var availability = AvailabilitySettings()
-    var planResult: AssignmentStudyPlan?
+    var availability = AvailabilitySettings() { didSet { planResult = nil } }
+    let appleCalendar = AppleCalendarViewModel()
+    var planResult: AssignmentStudyPlan? { didSet { appleCalendar.invalidate() } }
     var assignmentProgress: [String: AssignmentProgress] = [:]
     var assignmentProgressError: String?
     var dataMode: StudyDataMode = .live {
@@ -91,8 +95,14 @@ final class PlannerViewModel {
     }
 
     func generatePlan(estimates: [String: Int] = [:], priorities: [String: Int] = [:]) {
-        planResult = dataset.makePlan(progress: assignmentProgress,
-            availability: availability, estimates: estimates, priorities: priorities, now: Date())
+        let now = Date()
+        do {
+            planResult = try appleCalendar.makePlan(dataset: dataset, progress: assignmentProgress,
+                availability: availability, estimates: estimates, priorities: priorities, now: now)
+        } catch {
+            planResult = nil
+            message = "Calendar busy times could not be refreshed. Reconnect Calendar before generating a publishable plan."
+        }
     }
 
     var dataset: AcademicDataset {
@@ -124,6 +134,7 @@ final class PlannerViewModel {
     }
 
     func saveAvailability() {
+        planResult = nil
         do { try database?.save(availability); message = "Availability preferences saved locally." }
         catch { message = "Could not save availability: \(error.localizedDescription)" }
     }
@@ -423,7 +434,13 @@ struct ContentView: View {
                         Label("\(item.title): \(item.minutes) minutes could not be scheduled before the deadline.", systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange).padding(12).background(.background, in: RoundedRectangle(cornerRadius: 8))
                     }
-                    Text("This proposal is local and has not been written to a calendar. Fixed imported events and protected rest are avoided.")
+                    if model.dataMode == .live {
+                        Button("Preview Apple Calendar changes") {
+                            model.appleCalendar.prepare(snapshot, timeZone: model.availability.timeZoneIdentifier, mode: model.dataMode)
+                        }.disabled(!model.appleCalendar.ready || model.appleCalendar.hasPending || plan.blocks.isEmpty)
+                        Text(model.appleCalendar.status).font(.caption).foregroundStyle(.secondary)
+                    }
+                    Text("This is a local proposal. Connect Apple Calendar to check busy times, then preview and approve publication.")
                         .font(.callout).foregroundStyle(.secondary)
                 } else {
                     Text("A deadline has passed since this proposal was generated. Generate a new proposal for the remaining upcoming assignments.")
@@ -487,11 +504,11 @@ struct ContentView: View {
     }
 
     private func effortBinding(for id: String) -> Binding<Int> {
-        Binding(get: { assignmentEffort[id, default: 180] }, set: { assignmentEffort[id] = $0 })
+        Binding(get: { assignmentEffort[id, default: 180] }, set: { assignmentEffort[id] = $0; model.planResult = nil })
     }
 
     private func priorityBinding(for id: String) -> Binding<Int> {
-        Binding(get: { assignmentPriority[id, default: 3] }, set: { assignmentPriority[id] = $0 })
+        Binding(get: { assignmentPriority[id, default: 3] }, set: { assignmentPriority[id] = $0; model.planResult = nil })
     }
 
     private var reviewView: some View {
@@ -550,7 +567,7 @@ struct ContentView: View {
             heading("Connections", subtitle: "Connect Oxford Canvas with a read-only API token")
             canvasConnectionView
             connection("Microsoft 365", detail: "Not connected · no mailbox data accessed", icon: "envelope")
-            connection("Apple Calendar", detail: "Not connected · EventKit permission not requested", icon: "calendar")
+            AppleCalendarConnectionView(model: model.appleCalendar)
             Spacer()
         }
     }
