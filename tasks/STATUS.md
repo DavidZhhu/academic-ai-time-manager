@@ -54,6 +54,20 @@ Implemented on the explicitly requested `feature/calendar-redesign`, based on `m
 Git delivery: commit and push only `feature/calendar-redesign`, then open a **draft PR targeting main**. No merge, force-push or branch-protection changes. The final response supplies the commit and PR URL.
 
 **Approval requested:** review Stage 1 and the manual checks before approving Stage 2. Stop at this milestone as required by `AGENTS.md`; no next-stage approval is assumed.
+## Latest task — GitHub Actions Swift generic-decoding compatibility (2026-10-19)
+
+### Finding and change
+
+- `.github/workflows/ci.yml` runs `swift test` on unpinned `macos-latest`; `Package.swift` declares Swift tools version 6.0. The CI compiler reported that `readJSON<T: Decodable>(_:).first` did not constrain `T` in `lastSuccessfulCanvasSync()` and `outlookState()`.
+- Those readers now assign the query result to concrete `[Date]` and `[OutlookState]` values before taking `.first`. The adjacent `availabilitySettings()` reader now follows the same explicit `[AvailabilitySettings]` pattern. JSON keys, SQL queries, missing-row defaults, and persistence behavior are unchanged.
+- Added a regression test for empty and persisted Canvas-sync and Outlook-state settings. It confirms the `nil` and `OutlookState()` defaults as well as round-tripped values.
+
+### Verification
+
+- Debug: `swift test --disable-sandbox` — **119 passed, 0 failures**.
+- Release: `swift test -c release --disable-sandbox` — **119 passed, 0 failures**.
+- Verified with Apple Swift 6.4 locally. The ordinary sandboxed SwiftPM invocation was blocked before compilation by compiler-cache permissions; disabling the package sandbox allowed the unchanged fixture-only suite to compile and run. `git diff --check` passes.
+- No signing identity, credential, permission, database schema, network integration, or calendar behavior changed.
 
 ## Latest task — stable development signing for Calendar permission persistence (2026-10-19)
 

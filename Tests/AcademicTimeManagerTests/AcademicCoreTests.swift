@@ -47,6 +47,21 @@ final class AcademicCoreTests: XCTestCase {
         XCTAssertEqual(try db.availabilitySettings(), settings)
     }
 
+    func testSettingsReadersPreserveEmptyAndPersistedValues() throws {
+        let db = try LocalDatabase()
+        XCTAssertNil(try db.lastSuccessfulCanvasSync())
+        XCTAssertEqual(try db.outlookState(), OutlookState())
+
+        let successfulAt = Date(timeIntervalSince1970: 1_800_000_000)
+        try db.importCanvas(CanvasImportResult(sourceRecords: [], academicItems: []), successfulAt: successfulAt)
+        var state = OutlookState()
+        state.settings.timeZoneIdentifier = "Europe/London"
+        try db.save(state)
+
+        XCTAssertEqual(try db.lastSuccessfulCanvasSync(), successfulAt)
+        XCTAssertEqual(try db.outlookState(), state)
+    }
+
 
     func testSchedulerAvoidsFixedEventsAndPlansBeforeDeadline() {
         let base = Date(timeIntervalSince1970: 1_800_000_000)

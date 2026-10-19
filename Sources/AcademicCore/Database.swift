@@ -123,11 +123,13 @@ public final class LocalDatabase {
     }
 
     public func availabilitySettings() throws -> AvailabilitySettings? {
-        try readJSON("SELECT payload_json FROM app_settings WHERE key = 'availability';").first
+        let values: [AvailabilitySettings] = try readJSON("SELECT payload_json FROM app_settings WHERE key = 'availability';")
+        return values.first
     }
 
     public func lastSuccessfulCanvasSync() throws -> Date? {
-        try readJSON("SELECT payload_json FROM app_settings WHERE key = 'canvas_last_successful_sync';").first
+        let values: [Date] = try readJSON("SELECT payload_json FROM app_settings WHERE key = 'canvas_last_successful_sync';")
+        return values.first
     }
 
     public func save(_ progress: AssignmentProgress) throws {
@@ -143,7 +145,8 @@ public final class LocalDatabase {
     }
 
     public func outlookState() throws -> OutlookState {
-        try readJSON("SELECT payload_json FROM app_settings WHERE key = 'outlook_state';").first ?? OutlookState()
+        let values: [OutlookState] = try readJSON("SELECT payload_json FROM app_settings WHERE key = 'outlook_state';")
+        return values.first ?? OutlookState()
     }
 
     public func save(_ state: OutlookState) throws {
