@@ -50,8 +50,8 @@ final class PlannerViewModel {
             for review in fixture.reviews where !savedReviews.contains(where: { $0.id == review.id }) { try db.save(review) }
             let savedConflicts = try db.conflicts()
             for conflict in fixture.conflicts where !savedConflicts.contains(where: { $0.id == conflict.id }) { try db.save(conflict) }
-            availability = try db.availabilitySettings() ?? AvailabilitySettings()
-            try db.save(availability)
+            // A failed read throws into the catch below; saved preferences are never replaced by defaults.
+            availability = try db.loadOrCreateAvailabilitySettings()
             database = db
             items = try db.items()
             assignmentProgress = try db.assignmentProgress()

@@ -4,6 +4,36 @@ Updated: 2026-10-19 (Europe/London)
 
 Current position: **M0–M1 complete; Canvas sync, local completion tracking, demo/live separation, Microsoft Outlook integration, and unified Apple Calendar Timeline display are integrated on main and verified with fixtures. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
 
+## Latest task — SQLite reliability hardening (2026-10-20)
+
+Scope: the first, narrow fixes from the independent architecture review on `feature/claude-improvements`. No schema, migration, tombstone or Canvas-reconciliation changes; the review's other findings remain open.
+
+### Root causes
+
+- **Silent truncated reads.** `LocalDatabase.readJSON` looped `while sqlite3_step == SQLITE_ROW` and never inspected the final result, so `SQLITE_BUSY`, I/O or corruption errors looked like "no more rows" and returned an empty or partial array.
+- **Possible settings overwrite at launch.** `PlannerViewModel.init` read availability with `?? AvailabilitySettings()` and then always saved the result. Combined with the silent empty read, a transient failure could replace saved preferences with defaults.
+- **No lock waiting.** No `busy_timeout` was set, so a second connection (for example `swift run` beside the packaged app) failed immediately with "database is locked".
+- **Rollback-journal mode.** Readers and the writer blocked each other.
+
+### Changes
+
+- `Sources/AcademicCore/Database.swift`: `readJSON` now throws a `DatabaseError` unless the last step is `SQLITE_DONE`. `init(path:busyTimeoutMilliseconds:enableWAL:)` sets `sqlite3_busy_timeout` (default 5000 ms, negative values clamp to 0) before any other statement and requests `PRAGMA journal_mode=WAL`. A failed or ignored request (for example in-memory databases) is not fatal and the reported `journalMode` is exposed. New `loadOrCreateAvailabilitySettings(default:)` saves defaults only when no row exists and never writes after a failed read.
+- `Sources/AcademicTimeManager/App.swift`: launch uses `loadOrCreateAvailabilitySettings()`; a failed read falls into the existing "local storage unavailable" path without writing.
+- New `Tests/AcademicTimeManagerTests/SQLiteReliabilityTests.swift` (15 tests, temporary synthetic databases only): busy and corrupt reads throw and leave data untouched; settings preserved on read failure and busy; defaults created only when absent; busy timeout configured, waits for a writer then succeeds, and fails cleanly after the timeout; a locked Canvas import rolls back and leaves no open transaction; WAL on for file stores, off for memory and when disabled; a rollback-journal store converts to WAL with items, settings, progress and the three migration rows intact; WAL readers are not blocked by a writer; opening while another connection blocks the switch fails cleanly and succeeds afterwards.
+- The read-failure test was checked against the old loop and fails three assertions without the fix.
+
+### Verification
+
+- Debug `swift test --disable-sandbox`: **148 passed, 0 failures** (133 existing + 15 new). Release `swift test -c release --disable-sandbox`: **148 passed, 0 failures**.
+- No app launch, real database, account, Keychain record or personal Calendar data was used.
+
+### Risks and notes
+
+- WAL stores data in `planner.sqlite-wal` and `planner.sqlite-shm` beside the database. Copy or back up all three files together (or quit the app first, which checkpoints). `*.sqlite` is already git-ignored; add the `-wal`/`-shm` patterns if such files are ever created in the repository.
+- The unsupported-filesystem fallback is covered by code inspection and the blocked-switch test, not by a real unsupported filesystem.
+- Existing behaviour not changed: `migrate()` still writes version rows on every open, so opening while another connection holds a read transaction in rollback mode fails after the timeout; it fixes itself once the store is in WAL mode.
+- Still open from the review: Canvas stale-data reconciliation, per-row decode quarantine, versioned migrations, Calendar session release, EventKit main-thread work, Outlook state integrity, CI pinning.
+
 ## Merge update — custom app icon branch (2026-10-19)
 
 Merged current `origin/main` into `feature/custom-app-icon`, retaining the calendar redesign report below and the custom-icon report. The explicit `decoder.decode(T.self, ...)` fix from the merged CI repair is present in `Database.swift`. No conflict markers remain. The merged debug and release suites each passed **133 tests, 0 failures**; rebuilt packaging preserved `AcademicTimeManager.icns`, `CFBundleIconFile`, the bundle identifier, and the existing stable Apple Development signature. No live accounts, Calendar data, or Keychain records were accessed.
