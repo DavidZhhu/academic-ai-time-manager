@@ -287,6 +287,16 @@ public struct CalendarJournal: Codable, Sendable {
         return result
     }
 
+    /// An inspector cancellation is bound to the exact session the user opened. The existing
+    /// plan cancellation, approval, journal and undo paths still perform the actual removal.
+    public func previewCancellation(key: String, expected: AppleCalendarEvent) throws -> CalendarPreview {
+        invalidatePreview(); try ready()
+        guard let current = try ownedEvent(key: key), current.sameContent(as: expected),
+              !current.isAllDay else { throw AppleCalendarError.ownership }
+        return try preview(blocks: [], timeZone: current.timeZone, mode: .live,
+                           expiresAt: now().addingTimeInterval(300), cancelKeys: [key])
+    }
+
     public func managedKeys() -> [String] { journal.records.keys.sorted() }
     public func event(for key: String) -> AppleCalendarEvent? { journal.records[key] }
     public func invalidatePreview() { activePreview = nil; previewIsUndo = false }

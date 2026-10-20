@@ -37,6 +37,8 @@ For keyboard access, choose **New session (⌘N)**, or inspect an owned session 
 
 Select **Review changes**, inspect the before/after dates, time zones and duration, then explicitly select **Approve exact changes**. Cancel/Escape or dismissing makes no writes. Conflicts with unfiltered Canvas/approved Outlook commitments, Calendar busy events (including all-day/recurring occurrences), and other study sessions block changes. Invalid or past ranges are rejected. Calendar setup and pending-write recovery are available in Connections; previews require an available managed calendar. Connections also retains explicitly approved cancellation and undo.
 
+Open an app-owned session in Event details and choose **Cancel study session…** to review its exact title, start, end and managed calendar. **Approve cancellation** is required to remove it. **Keep session** or dismissing the preview leaves it in place. After a change, **Preview undo…** appears on Timeline; restoring it requires its own approval. If ownership cannot be verified, refresh Calendar in Connections, inspect external edits in Apple Calendar, or use the read-only pending-write recovery control before trying a new preview.
+
 Personal Apple Calendar events remain protected and read-only. Only unchanged events recognized by the ownership journal receive editing controls; original personal titles stay in transient local memory. No accounts or personal Calendar data were accessed during development. Pointer/focus/VoiceOver interaction and live account behavior require the user-led checks in [Apple Calendar integration](docs/APPLE_CALENDAR.md).
 
 ## Connect Microsoft Outlook

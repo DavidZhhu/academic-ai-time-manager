@@ -93,6 +93,11 @@ final class AppleCalendarViewModel {
         invalidate()
         return try connection().previewSession(draft)
     }
+    func prepareCancellation(for event: UnifiedTimelineEvent) throws -> CalendarPreview {
+        invalidate()
+        guard let draft = draft(for: event), let original = draft.original else { throw AppleCalendarError.ownership }
+        return try connection().previewCancellation(key: draft.key, expected: original)
+    }
     func approveSession(_ preview: CalendarPreview) throws {
         do {
             let service = try connection()
@@ -231,7 +236,7 @@ struct AppleCalendarPreviewView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             Text("Review Apple Calendar changes").font(.title2.bold())
-            Text("Destination: Academic AI Time Manager. Only the changes below will be applied. Sessions omitted from a new plan are kept until you explicitly cancel them in Connections.")
+            Text("Destination: Academic AI Time Manager. Only the changes below will be applied. Sessions omitted from a new plan are kept until you explicitly cancel them from Event details or Connections.")
             if let preview = model.preview {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 14) {

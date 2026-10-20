@@ -2,12 +2,20 @@
 
 Updated: 2026-10-20 (Europe/London)
 
-Current position: **M0–M1 complete; Canvas sync, local completion tracking, demo/live separation, Microsoft Outlook integration, and unified Apple Calendar Timeline display are integrated on main and verified with fixtures. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
+Current position: **M0–M1 complete; Canvas sync, local completion tracking, Microsoft Outlook integration, and unified Apple Calendar Timeline display are integrated on main. Stage 2 interactive controls and cancellation follow-up are on draft PR #7. The production UI uses Live Data only. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
+
+## Stage 2 PR #7 follow-up — Timeline cancellation (2026-10-20)
+
+Expected behavior: Event details for an unchanged app-owned session offers **Cancel study session…**; review names the exact title, date, time and dedicated calendar. Only explicit approval removes that session. Dismissal, ownership mismatch, personal events, external edits and pending writes leave events untouched; a confirmed cancellation refreshes Timeline and can be undone through a separately approved preview. Unsafe events explain the recovery path in Event details.
+
+Implementation: Added a snapshot-bound `previewCancellation` service entry point, a dedicated review sheet and Event details action, plus a visible Timeline **Preview undo…** control. The service reuses the existing journal, marker/calendar checks, preview expiry, per-write ownership recheck, durable write intent, undo history and read-only interrupted-write recovery. No account, credential, production database or personal Calendar data was accessed; tests use only synthetic mock events and a memory journal. Five new tests cover approved single-session removal, dismissal without writes, personal/unknown keys, stale or externally edited ownership, and separately approved undo. Live EventKit UI behavior remains a user-led test-account check.
+
+Validation: debug **219 passed, 0 failures**; release **219 passed, 0 failures**. Release SwiftPM manifest loading required an approved run outside the sandbox after `sandbox_apply: Operation not permitted`. `scripts/package-macos.sh` rebuilt and verified the signed local app, including plist validity, designated requirement and stable identifier `org.example.AcademicTimeManager` under Apple Development team `4JXVG992V7`. No real account or personal Calendar access was performed. The branch is `feature/interactive-calendar`; push updates draft PR #7 without merging.
 
 
 ## Completed task — interactive calendar Stage 2 (2026-10-20)
 
-Implemented on `feature/interactive-calendar`, based on latest fetched `origin/main` at `c0cbb6e`. The branch and a clean working tree were verified before edits; `main` and unrelated worktrees remain untouched. Two pre-existing empty untracked files (`1558718`, `FETCH_HEAD`) were preserved under `/private/tmp/academic-calendar-stage2-preserved/` before work started. No live Canvas, Outlook, Apple Calendar, Keychain item, OAuth flow, production database, or personal data was accessed.
+Implemented on `feature/interactive-calendar`, rebased onto `origin/main` at `6e213db`. The branch and a clean working tree were verified before edits; `main` and unrelated worktrees remain untouched. Two pre-existing empty untracked files (`1558718`, `FETCH_HEAD`) were preserved under `/private/tmp/academic-calendar-stage2-preserved/` before work started. No live Canvas, Outlook, Apple Calendar, Keychain item, OAuth flow, production database, or personal data was accessed.
 
 ### Delivered behavior
 
@@ -28,8 +36,8 @@ Implemented on `feature/interactive-calendar`, based on latest fetched `origin/m
 
 ### Verification
 
-- Debug `swift test`: **151 passed, 0 failures**.
-- Release `swift test -c release`: **151 passed, 0 failures**.
+- Debug `swift test` for the original Stage 2 delivery: **214 passed, 0 failures** after the Reminders integration rebase. The cancellation follow-up raises this to **219 passed**.
+- Release `swift test -c release` for the original Stage 2 delivery: **214 passed, 0 failures** after the Reminders integration rebase. The cancellation follow-up raises this to **219 passed**.
 - New coverage exercises creation, 15-minute snapping, Day/Week moves, resizing, keyboard draft validation, DST selection, invalid ranges, Canvas/Outlook/EventKit/study conflicts at preview and approval, hidden constraints, all-day/recurring occurrences, personal/in-managed-calendar protection, external edits, cancellation, undo, stable slot identity, duplicate retries, offline/revoked access and interrupted-write recovery.
 - Synthetic SwiftUI/AppKit renders exercised production calendar components in Day, Week, Month, narrow, dark and session-editor layouts. The harness substitutes in-memory data and does not construct the production app model, database, EventKit client or credential stores.
 - `git diff --check` passed. Release packaging through `scripts/package-macos.sh` rebuilt `build-output/AcademicTimeManager.app`, retained `AcademicTimeManager.icns`, `org.example.AcademicTimeManager`, the Microsoft OAuth callback and the Apple Development signing identity. The script's strict/deep signature, stable designated-requirement and plist checks passed. A direct signature probe inside the restricted sandbox could not access the Apple trust chain; this does not invalidate the successful packaging verification outside it.
@@ -40,7 +48,7 @@ Implemented on `feature/interactive-calendar`, based on latest fetched `origin/m
 - Dragging does not auto-scroll at a Day/Week edge; use the editor date/time controls to target ranges outside the current visible grid. Dense overlapping labels remain an interface refinement opportunity.
 - EventKit can confirm local-store save only; macOS owns remote account synchronization. Developer ID distribution, notarization and broad MVP hardening remain separate work.
 
-Git delivery is in progress: the feature branch is being rebased onto the newly advanced `origin/main`; no merge, force-push or repository-setting change is authorized.
+Git delivery: Stage 2 is on draft PR #7 targeting `main`; the cancellation follow-up updates the same feature branch. No merge, force-push or repository-setting change is authorized.
 
 ## Latest task — Apple Reminders Stage 1, read-only (2026-10-20)
 

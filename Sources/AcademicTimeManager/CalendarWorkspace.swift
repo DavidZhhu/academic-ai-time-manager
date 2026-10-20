@@ -8,6 +8,7 @@ struct CalendarWorkspace: View {
     let priority: [String: Int]
     var openReminder: (String) -> Void = { _ in }
     @State private var draft: CalendarSessionDraft?
+    @State private var cancellationPreview: CalendarPreview?
     private var interval: DateInterval { CalendarPresentation.visibleInterval(date: state.date, mode: state.mode) }
     private var events: [UnifiedTimelineEvent] {
         CalendarPresentation.events(model.timelineEvents, in: interval, sources: state.visibleSources)
@@ -53,7 +54,14 @@ struct CalendarWorkspace: View {
                         if let date = model.lastSuccessfulCanvasSync {
                             Text("Canvas synced \(date.formatted(date: .abbreviated, time: .shortened))").foregroundStyle(.secondary)
                         }
-                        Text(model.appleCalendar.status).foregroundStyle(.secondary).lineLimit(2).help(model.appleCalendar.status)
+                        HStack {
+                            Text(model.appleCalendar.status).foregroundStyle(.secondary).lineLimit(2).help(model.appleCalendar.status)
+                            Spacer(minLength: 8)
+                            if model.appleCalendar.canUndo {
+                                Button("Preview undo…") { model.appleCalendar.undo() }
+                                    .help("Review and approve undo of the last Calendar change.")
+                            }
+                        }
                     }.font(.caption2).padding(.horizontal, 18).padding(.vertical, 8)
                 }
             }.frame(minWidth: 320)
@@ -62,14 +70,23 @@ struct CalendarWorkspace: View {
                     .frame(minWidth: 220, idealWidth: 270, maxWidth: 340)
             }
         }
-        .sheet(isPresented: Binding(get: { selectedEvent != nil || draft != nil }, set: {
-            if !$0 { state.selectedEventID = nil; draft = nil }
+        .sheet(isPresented: Binding(get: { selectedEvent != nil || draft != nil || cancellationPreview != nil }, set: {
+            if !$0 { state.selectedEventID = nil; draft = nil; cancellationPreview = nil; model.appleCalendar.invalidate() }
         })) {
-            if let draft {
+            if let cancellationPreview {
+                CalendarSessionCancellationView(model: model.appleCalendar, preview: cancellationPreview) {
+                    self.cancellationPreview = nil
+                }
+            } else if let draft {
                 CalendarSessionEditor(model: model.appleCalendar, draft: draft).id(draft.id)
             } else if let event = selectedEvent {
                 CalendarEventInspector(event: event, sources: model.dataset.sources,
-                    edit: event.isEditableStudySession ? { draft = model.appleCalendar.draft(for: event) } : nil)
+                    edit: event.isEditableStudySession ? { draft = model.appleCalendar.draft(for: event) } : nil,
+                    cancel: event.isEditableStudySession ? {
+                        let preview = try model.appleCalendar.prepareCancellation(for: event)
+                        cancellationPreview = preview
+                        state.selectedEventID = nil
+                    } : nil)
             }
         }
     }
