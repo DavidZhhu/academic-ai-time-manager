@@ -100,6 +100,7 @@ cat > "$CONTENTS_PATH/Info.plist" <<'PLIST'
     <key>CFBundleURLSchemes</key><array><string>msauth.org.example.AcademicTimeManager</string></array></dict></array>
     <key>LSMinimumSystemVersion</key><string>14.0</string>
     <key>NSCalendarsFullAccessUsageDescription</key><string>Read calendar busy times to avoid conflicts and save only study sessions you approve in the dedicated Academic AI Time Manager calendar.</string>
+    <key>NSRemindersFullAccessUsageDescription</key><string>Read your reminders, due dates and lists to show them in the planner. Access is read-only: reminders are never changed, completed or deleted, and their content stays on this Mac.</string>
 </dict>
 </plist>
 PLIST

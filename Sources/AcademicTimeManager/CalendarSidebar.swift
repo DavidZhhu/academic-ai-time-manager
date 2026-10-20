@@ -41,6 +41,11 @@ struct CalendarSidebar: View {
                     .toggleStyle(.checkbox)
                     .help("Show or hide \(source.label). Scheduling still respects hidden commitments.")
                 }
+                Toggle(isOn: $state.showsReminderMarkers) {
+                    Label("Reminder due dates", systemImage: "checklist").font(.callout).foregroundStyle(.teal)
+                }
+                .toggleStyle(.checkbox)
+                .help("Show or hide Apple Reminders due-date markers. They are never busy time.")
                 Text("Filters change this calendar only.")
                     .font(.caption).foregroundStyle(.secondary)
             }

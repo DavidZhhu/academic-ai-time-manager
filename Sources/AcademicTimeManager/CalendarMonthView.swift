@@ -3,6 +3,8 @@ import SwiftUI
 
 struct CalendarMonthView: View {
     let events: [UnifiedTimelineEvent]
+    var markers: [ReminderDueMarker] = []
+    var openReminder: (String) -> Void = { _ in }
     @Binding var state: CalendarPresentationState
     private var calendar: Calendar { .current }
     private let columns = Array(repeating: GridItem(.flexible(minimum: 80), spacing: 1), count: 7)
@@ -34,10 +36,13 @@ struct CalendarMonthView: View {
                         .foregroundStyle(calendar.isDateInToday(day) ? Color.white : Color.primary)
                         .background(calendar.isDateInToday(day) ? Color.accentColor : .clear, in: Circle())
                 }.contentShape(Rectangle())
-            }.buttonStyle(.plain).accessibilityLabel("Open Day view for \(day.formatted(date: .complete, time: .omitted)), \(dayEvents.count) events")
+            }.buttonStyle(.plain).accessibilityLabel("Open Day view for \(day.formatted(date: .complete, time: .omitted)), \(dayEvents.count) events, \(RemindersPresentation.markers(markers, on: day).count) reminders due")
             ForEach(Array(dayEvents.prefix(3))) { event in
                 CalendarEventBlock(event: event, compact: true, selected: state.selectedEventID == event.id) { state.selectedEventID = event.id }
                     .frame(height: 20)
+            }
+            ForEach(Array(RemindersPresentation.markers(markers, on: day).prefix(2))) { marker in
+                ReminderMarkerChip(marker: marker, open: openReminder)
             }
             if dayEvents.count > 3 {
                 Button("+\(dayEvents.count - 3) more") { state.openDay(day) }

@@ -6,9 +6,13 @@ struct CalendarWorkspace: View {
     @Binding var state: CalendarPresentationState
     let effort: [String: Int]
     let priority: [String: Int]
+    var openReminder: (String) -> Void = { _ in }
     private var interval: DateInterval { CalendarPresentation.visibleInterval(date: state.date, mode: state.mode) }
     private var events: [UnifiedTimelineEvent] {
         CalendarPresentation.events(model.timelineEvents, in: interval, sources: state.visibleSources)
+    }
+    private var reminderMarkers: [ReminderDueMarker] {
+        state.showsReminderMarkers ? model.reminderMarkers(in: interval) : []
     }
     private var selectedEvent: UnifiedTimelineEvent? {
         // Resolve by ID against current scoped values; never retain a stale personal title on mode changes.
@@ -22,7 +26,7 @@ struct CalendarWorkspace: View {
                 HStack(spacing: 8) {
                     Label(model.dataMode == .demo ? "Demo Mode" : "Live data", systemImage: model.dataMode == .demo ? "sparkles" : "checkmark.shield")
                         .fontWeight(.medium)
-                    Text("· \(events.count) events")
+                    Text("· \(events.count) events" + (reminderMarkers.isEmpty ? "" : " · \(reminderMarkers.count) reminders due"))
                     Spacer()
                     Text(TimeZone.current.identifier)
                 }.font(.caption).foregroundStyle(.secondary).padding(.horizontal, 18).padding(.vertical, 8)
@@ -34,9 +38,10 @@ struct CalendarWorkspace: View {
                         .font(.callout).foregroundStyle(.secondary).padding(.horizontal, 18).padding(.bottom, 8)
                 }
                 if state.mode == .month {
-                    CalendarMonthView(events: events, state: $state)
+                    CalendarMonthView(events: events, markers: reminderMarkers, openReminder: openReminder, state: $state)
                 } else {
-                    CalendarTimeGrid(days: CalendarPresentation.days(containing: state.date, mode: state.mode), events: events, state: $state)
+                    CalendarTimeGrid(days: CalendarPresentation.days(containing: state.date, mode: state.mode), events: events,
+                                     markers: reminderMarkers, openReminder: openReminder, state: $state)
                 }
                 Divider()
                 if model.dataMode == .live {
@@ -51,7 +56,7 @@ struct CalendarWorkspace: View {
                 }
             }.frame(minWidth: 320)
             if state.showsTasks {
-                AcademicTaskPanel(model: model, effort: effort, priority: priority)
+                AcademicTaskPanel(model: model, effort: effort, priority: priority, openReminder: openReminder)
                     .frame(minWidth: 220, idealWidth: 270, maxWidth: 340)
             }
         }

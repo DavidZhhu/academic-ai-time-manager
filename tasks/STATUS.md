@@ -4,7 +4,29 @@ Updated: 2026-10-19 (Europe/London)
 
 Current position: **M0–M1 complete; Canvas sync, local completion tracking, demo/live separation, Microsoft Outlook integration, and unified Apple Calendar Timeline display are integrated on main and verified with fixtures. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
 
-## Latest task — Canvas data reconciliation (2026-10-20)
+## Latest task — Apple Reminders Stage 1, read-only (2026-10-20)
+
+Branch `feature/apple-reminders-integration`, based on `main` (`c2ece4d`). Details: [docs/APPLE_REMINDERS.md](../docs/APPLE_REMINDERS.md).
+
+### Delivered behavior
+- Read-only EventKit Reminders: explicit Full Access request from Connections only; launch, change-notification (coalesced) and 5-minute refresh never prompt. Revocation, write-only access, failed reads, missing lists, deleted reminders, duplicates and recurring reminders are handled; permission loss clears in-memory content.
+- Imports title, notes, due date (date-only vs timed, time zone), priority, completion, http(s) URL, recurrence flag, device + external IDs and list/source info across all lists. Subtasks: model and UI support `parentID`, but the public EventKit API exposes no hierarchy, so none is imported (documented).
+- UI: Reminders page (list navigation, reminder list, details, completion indicators, due dates), Reminders section in the collapsible Academic Tasks panel, due-date markers in Day/Week/Month (not busy time, sidebar toggle), Connections card, Info.plist `NSRemindersFullAccessUsageDescription`.
+- Content is memory-only, never persisted, never sent to AI/cloud; Demo Mode shows none. Nothing is written to Reminders; test-enforced.
+- Not implemented (by design): write-back, conflict resolution, deletion history, AI estimates/scheduling, subtask scheduling, Canvas duplicate linking, Calendar publishing of reminders.
+
+### Files
+New: `Sources/AcademicCore/Reminders.swift`, `EventKitRemindersClient.swift`, `Sources/AcademicTimeManager/RemindersUI.swift`, `Tests/.../RemindersTests.swift` (30 tests), `docs/APPLE_REMINDERS.md`. Modified: `CalendarPresentation.swift`, `App.swift`, `AcademicTaskPanel.swift`, `CalendarWorkspace.swift`, `CalendarMonthView.swift`, `CalendarTimeGrid.swift`, `CalendarSidebar.swift`, `scripts/package-macos.sh`, docs.
+
+### Verification
+Debug `swift test --disable-sandbox`: **196 passed, 0 failures**. Release: **196 passed, 0 failures** (166 existing + 30 new). `scripts/package-macos.sh` built and strictly verified the Apple Development-signed app (identifier `org.example.AcademicTimeManager`, team 4JXVG992V7, custom icon present, Calendar usage string intact). The app was not launched and no real Reminders, Calendar, Canvas or Outlook data was accessed.
+
+### Remaining risks / user-led checks
+- Live EventKit behaviour (permission prompt, URL fields, shared lists, recurring series) is unverified; follow the manual steps in docs/APPLE_REMINDERS.md.
+- UI was compiled but not visually inspected; check layout at normal and narrow widths, and VoiceOver on markers.
+- `EKEventStoreChanged` also fires for Calendar edits, causing a harmless extra read.
+
+## Previous task — Canvas data reconciliation (2026-10-20)
 
 Branch `fix/canvas-data-reconciliation`, based on `origin/main` (`5b950bb`). Fixes review finding 1: Canvas sync only upserted, so deleted or changed Canvas data stayed in the Timeline and scheduler.
 

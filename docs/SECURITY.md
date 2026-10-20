@@ -43,3 +43,10 @@ Verify university policies, applicable data handling rules, and API terms before
 - PDFKit is used for text extraction only; no document actions are invoked. DOCX decompression and XML parsing occur in memory, with CRC checking, no filesystem extraction, no external entities, and macro/embedding/external-relationship rejection. Unsupported/encrypted/scanned documents may be skipped with a notice. PDFKit page parsing cannot be preempted mid-call; this remains a hardening limitation.
 - Shared sender/keyword rules filter relevance before attachment retrieval. Review excerpts and provenance are persisted locally; full email bodies and original attachment files are not. Cloud transmission is blocked by the analysis boundary. Sync cursors are opaque synchronization state, not bearer credentials, and are not logged.
 - Multi-selection approval/rejection is a local transaction with an audit entry per decision. No unapproved proposal reaches the Timeline or scheduler. Cancellation/rescheduling requires human follow-up and never silently changes a protected event. Disconnect removes only the selected account's credential and preserves imported data and local completion choices.
+
+## Apple Reminders safeguards (2026-10-20)
+
+- Read-only by construction: the client protocol has no write members, the adapter has no save/remove/commit/assignment, and tests scan both. No real reminder was read, modified, completed or deleted during development; tests use a synthetic mock client.
+- Permission is requested only by an explicit button press (Full Access). Launch, notification and periodic paths never prompt. Revocation clears all reminder content and stops observation. Write-only access is rejected.
+- Titles, notes, URLs and list names are held in process memory only: never SQLite, source records, journals, logs, analysis providers or the network. Reminder text is untrusted display data and is never interpreted as instructions. Only http(s) URLs are kept. Demo Mode displays no reminders.
+- Reminders cannot affect scheduling or Calendar writes in Stage 1.

@@ -5,6 +5,7 @@ struct AcademicTaskPanel: View {
     @Bindable var model: PlannerViewModel
     let effort: [String: Int]
     let priority: [String: Int]
+    var openReminder: (String) -> Void = { _ in }
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
@@ -17,6 +18,7 @@ struct AcademicTaskPanel: View {
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 16) {
+                        ReminderTaskSection(model: model.reminders, isDemo: model.dataMode == .demo, open: openReminder)
                         if let error = model.assignmentProgressError {
                             Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
                         }
@@ -35,7 +37,7 @@ struct AcademicTaskPanel: View {
                 }
             }
             Divider()
-            Text("Local progress · estimates editable in Plan preview")
+            Text("Local progress · estimates editable in Plan preview · reminders are read-only")
                 .font(.caption2).foregroundStyle(.secondary).padding(12)
         }.background(Color(nsColor: .controlBackgroundColor))
     }
