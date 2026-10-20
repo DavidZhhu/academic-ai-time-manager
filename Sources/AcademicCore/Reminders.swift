@@ -149,6 +149,7 @@ public struct RemindersSyncReport: Equatable, Sendable {
 @MainActor public final class RemindersSyncService {
     private let client: any RemindersClient
     private let now: () -> Date
+    private let sleep: @Sendable (Duration) async throws -> Void
     private var observation: (any AppleCalendarChangeObservation)?
     private var periodicTask: Task<Void, Never>?
     private var debounceTask: Task<Void, Never>?
@@ -160,8 +161,10 @@ public struct RemindersSyncReport: Equatable, Sendable {
     public var onUpdate: (@MainActor () -> Void)?
     public var access: RemindersAccess { client.access }
 
-    public init(client: any RemindersClient, now: @escaping () -> Date = Date.init) {
-        self.client = client; self.now = now
+    /// `sleep` drives the debounce and periodic timers; tests inject a manually advanced one.
+    public init(client: any RemindersClient, now: @escaping () -> Date = Date.init,
+                sleep: @escaping @Sendable (Duration) async throws -> Void = { try await Task.sleep(for: $0) }) {
+        self.client = client; self.now = now; self.sleep = sleep
     }
 
     /// The only place a permission prompt can originate, and only from an explicit user action.
@@ -214,10 +217,11 @@ public struct RemindersSyncReport: Equatable, Sendable {
     public func startMonitoring(interval: Duration = .seconds(300), debounce: Duration = .seconds(1)) {
         stopMonitoring()
         self.debounce = debounce
+        let sleep = self.sleep
         periodicTask = Task { [weak self] in
             await self?.syncIfAuthorized()
             while !Task.isCancelled {
-                do { try await Task.sleep(for: interval) } catch { return }
+                do { try await sleep(interval) } catch { return }
                 await self?.syncIfAuthorized()
             }
         }
@@ -238,9 +242,9 @@ public struct RemindersSyncReport: Equatable, Sendable {
 
     private func scheduleCoalescedSync() {
         debounceTask?.cancel()
-        let delay = debounce
+        let delay = debounce, sleep = self.sleep
         debounceTask = Task { [weak self] in
-            do { try await Task.sleep(for: delay) } catch { return }
+            do { try await sleep(delay) } catch { return }
             await self?.syncIfAuthorized()
         }
     }
