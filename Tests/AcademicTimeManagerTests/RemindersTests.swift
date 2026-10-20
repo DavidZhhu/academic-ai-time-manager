@@ -3,6 +3,74 @@ import XCTest
 @testable import AcademicCore
 
 /// Synthetic client. Never touches EventKit or any real Reminders data.
+/// A manually advanced replacement for `Task.sleep`: a sleeper suspends until `advance` or cancellation.
+private final class ManualSleeper: Sendable {
+    private struct Waiter { let id: Int; let duration: Duration; let continuation: CheckedContinuation<Void, Error> }
+    private struct Arrival { let duration: Duration; let count: Int; let continuation: CheckedContinuation<Void, Never> }
+    private struct State {
+        var waiters: [Waiter] = []
+        var cancelledBeforeStart: Set<Int> = []
+        var arrivals: [Arrival] = []
+        var nextID = 0
+        func count(of duration: Duration) -> Int { waiters.filter { $0.duration == duration }.count }
+    }
+    private let state = NSLock_Box()
+
+    func sleep(_ duration: Duration) async throws {
+        let id = state.withLock { s -> Int in defer { s.nextID += 1 }; return s.nextID }
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                let ready: [Arrival]? = state.withLock { s in
+                    if s.cancelledBeforeStart.remove(id) != nil { return nil }
+                    s.waiters.append(Waiter(id: id, duration: duration, continuation: continuation))
+                    let snapshot = s
+                    let ready = snapshot.arrivals.filter { snapshot.count(of: $0.duration) >= $0.count }
+                    s.arrivals.removeAll { a in snapshot.count(of: a.duration) >= a.count }
+                    return ready
+                }
+                if let ready { ready.forEach { $0.continuation.resume() } }
+                else { continuation.resume(throwing: CancellationError()) }
+            }
+        } onCancel: {
+            let waiter: Waiter? = state.withLock { s in
+                guard let w = s.waiters.first(where: { $0.id == id }) else { s.cancelledBeforeStart.insert(id); return nil }
+                s.waiters.removeAll { $0.id == id }
+                return w
+            }
+            waiter?.continuation.resume(throwing: CancellationError())
+        }
+    }
+
+    func sleeping(_ duration: Duration) -> Int { state.withLock { $0.count(of: duration) } }
+
+    /// Resumes every sleeper waiting for `duration`.
+    func advance(_ duration: Duration) {
+        let due: [Waiter] = state.withLock { s in
+            let due = s.waiters.filter { $0.duration == duration }
+            s.waiters.removeAll { $0.duration == duration }
+            return due
+        }
+        due.forEach { $0.continuation.resume() }
+    }
+
+    func waitUntilSleeping(_ duration: Duration, count target: Int) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let satisfied = state.withLock { s -> Bool in
+                if s.count(of: duration) >= target { return true }
+                s.arrivals.append(Arrival(duration: duration, count: target, continuation: continuation))
+                return false
+            }
+            if satisfied { continuation.resume() }
+        }
+    }
+
+    private final class NSLock_Box: @unchecked Sendable {
+        private let lock = NSLock()
+        private var value = State()
+        func withLock<R>(_ body: (inout State) -> R) -> R { lock.withLock { body(&value) } }
+    }
+}
+
 @MainActor private final class MockReminders: RemindersClient {
     fileprivate final class Observation: AppleCalendarChangeObservation {
         var cancelled = false
@@ -276,24 +344,45 @@ import XCTest
 
     func testMonitoringSyncsOnLaunchOnChangeNotificationAndPeriodically() async throws {
         let client = MockReminders(); client.listValues = [study]; client.values = [item("a")]
-        let sut = service(client)
-        sut.startMonitoring(interval: .milliseconds(400), debounce: .milliseconds(20))
-        try await Task.sleep(for: .milliseconds(150))
-        XCTAssertEqual(client.itemReads, 1)                 // launch sync
+        let clock = ManualSleeper()
+        let sut = RemindersSyncService(client: client, now: { self.now }, sleep: { try await clock.sleep($0) })
+        var updates = syncCompletions(of: sut).makeAsyncIterator()
+        let interval = Duration.milliseconds(400), debounce = Duration.milliseconds(20)
+        sut.startMonitoring(interval: interval, debounce: debounce)
+
+        await updates.next()                                // launch sync
+        XCTAssertEqual(client.itemReads, 1)
         XCTAssertEqual(client.observers, 1)
+        await clock.waitUntilSleeping(interval, count: 1)
+
         client.values = [item("a"), item("b")]
-        for _ in 0..<5 { client.changeHandler?() }          // a burst coalesces
-        try await Task.sleep(for: .milliseconds(150))
+        for _ in 0..<5 { client.changeHandler?() }          // a burst coalesces into one pending debounce
+        await clock.waitUntilSleeping(debounce, count: 1)
+        XCTAssertEqual(clock.sleeping(debounce), 1)
+        clock.advance(debounce)
+        await updates.next()
         XCTAssertEqual(client.itemReads, 2)
         XCTAssertEqual(sut.snapshot.items.count, 2)
-        try await Task.sleep(for: .milliseconds(700))
-        XCTAssertGreaterThanOrEqual(client.itemReads, 3)    // periodic refresh
+
+        await clock.waitUntilSleeping(interval, count: 1)
+        clock.advance(interval)                             // periodic refresh
+        await updates.next()
+        XCTAssertEqual(client.itemReads, 3)
+
+        await clock.waitUntilSleeping(interval, count: 1)
         sut.stopMonitoring()
         XCTAssertTrue(client.lastObservation!.cancelled)
-        let reads = client.itemReads
+        XCTAssertEqual(clock.sleeping(interval), 0)
         client.changeHandler?()
-        try await Task.sleep(for: .milliseconds(150))
-        XCTAssertEqual(client.itemReads, reads)
+        XCTAssertEqual(clock.sleeping(debounce), 0)         // nothing can schedule another sync
+        XCTAssertEqual(client.itemReads, 3)
+    }
+
+    /// Emits once per completed sync so tests await events instead of wall-clock time.
+    private func syncCompletions(of service: RemindersSyncService) -> AsyncStream<Void> {
+        let (stream, continuation) = AsyncStream<Void>.makeStream()
+        service.onUpdate = { continuation.yield() }
+        return stream
     }
 
     func testRevocationStopsObservation() async throws {
