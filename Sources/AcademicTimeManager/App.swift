@@ -81,13 +81,22 @@ final class PlannerViewModel {
             defer { isSyncingCanvas = false }
             do {
                 let batch = try await canvasSync.fetch()
-                try database.importCanvas(batch.result, successfulAt: batch.completedAt)
+                // A partial fetch (skipped courses or events) never counts as a successful sync.
+                let summary = try database.importCanvas(batch.result, successfulAt: batch.isComplete ? batch.completedAt : nil)
                 items = try database.items()
                 sourceRecords = try database.sourceRecords()
                 lastSuccessfulCanvasSync = try database.lastSuccessfulCanvasSync()
                 planResult = nil
-                canvasSyncHasError = false
-                message = "Canvas sync complete: \(batch.report.courseCount) courses, \(batch.report.sourceRecordCount) records and \(batch.report.academicItemCount) timeline events imported. Generate a new proposal to account for updated commitments."
+                canvasSyncHasError = !batch.isComplete
+                var text = batch.isComplete
+                    ? "Canvas sync complete: \(batch.report.courseCount) courses, \(batch.report.sourceRecordCount) records and \(batch.report.academicItemCount) timeline events imported."
+                    : "Canvas sync finished with gaps: \(batch.report.skippedCourseCount) course(s) or the calendar events could not be read, so their existing records were kept unchanged. The sync is not recorded as successful."
+                if summary.withdrawnSources + summary.withdrawnItems > 0 {
+                    text += " \(summary.withdrawnSources + summary.withdrawnItems) record(s) no longer in Canvas were withdrawn from the calendar and planning (history and your progress are kept)."
+                }
+                if summary.reinstated > 0 { text += " \(summary.reinstated) previously withdrawn record(s) returned." }
+                if let skipped = summary.skippedReason, batch.result.coverage != nil { text += " " + skipped }
+                message = text + " Generate a new proposal to account for updated commitments."
             } catch {
                 canvasSyncHasError = true
                 message = error.localizedDescription
@@ -233,7 +242,7 @@ struct ContentView: View {
                 }.disabled(model.isSyncingCanvas || model.database == nil || model.dataMode == .demo)
             }
             if model.isSyncingCanvas { ToolbarItem(placement: .status) { ProgressView().controlSize(.small).help("Reading Canvas data") } }
-            if model.canvasSyncHasError { ToolbarItem(placement: .status) { Label("Sync failed", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).help(model.message) } }
+            if model.canvasSyncHasError { ToolbarItem(placement: .status) { Label("Sync needs attention", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).help(model.message) } }
         }
         .task(id: model.dataMode) {
             outlook.attach(model.database)

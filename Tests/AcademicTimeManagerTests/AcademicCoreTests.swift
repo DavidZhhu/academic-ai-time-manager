@@ -7,7 +7,7 @@ final class AcademicCoreTests: XCTestCase {
         try db.migrate()
         XCTAssertEqual(try db.items(), [])
         XCTAssertEqual(try db.reviewItems(), [])
-        XCTAssertEqual(try db.migrationCount(), 3)
+        XCTAssertEqual(try db.migrationCount(), 4)
     }
 
     func testSourceUpsertIsIdempotentByIdentity() throws {

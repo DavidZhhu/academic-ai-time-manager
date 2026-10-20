@@ -4,6 +4,34 @@ Updated: 2026-10-19 (Europe/London)
 
 Current position: **M0–M1 complete; Canvas sync, local completion tracking, demo/live separation, Microsoft Outlook integration, and unified Apple Calendar Timeline display are integrated on main and verified with fixtures. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
 
+## Latest task — Canvas data reconciliation (2026-10-20)
+
+Branch `fix/canvas-data-reconciliation`, based on `origin/main` (`5b950bb`). Fixes review finding 1: Canvas sync only upserted, so deleted or changed Canvas data stayed in the Timeline and scheduler.
+
+### Delivered behavior
+
+- After a fetch, `importCanvas` withdraws (flags, never deletes) Canvas records Canvas no longer provides: deleted assignments and events, cleared due dates (deadline item withdrawn, undated assignment kept), dropped or inactive courses with their assignments and events. Changed deadlines update in place. Withdrawn records are excluded from `items()` / `sourceRecords()`, so Timeline, assignments and scheduling ignore them. Returning records are reinstated.
+- Safety: the importer reports `CanvasSyncCoverage`; only covered scope is reconciled. Course assignments or events that return 403/404 are skipped (records kept, sync not recorded as successful). Every other failure, including 401, 429/5xx, network, pagination limit and cancellation, aborts before the database is touched. An empty active-course list withdraws nothing. Events outside the requested window (minus a one-day margin) are never withdrawn. Results without coverage never withdraw.
+- Preserved: `assignment_progress`, source history and audit entries (`canvas-sync` actor); Outlook-approved commitments merged into a Canvas item survive with their non-Canvas sources; sample, Outlook and Calendar data are untouched.
+- Schema: additive version 4 (`canvas_record_status`); old stores open without row changes. The two `migrationCount` assertions and the WAL test were updated from 3 to 4.
+- UI: sync message reports gaps, withdrawn and reinstated counts; a partial sync shows "Sync needs attention" and does not advance the last-successful time.
+
+### Files changed
+
+`Sources/AcademicCore/CanvasReconciliation.swift` (new), `CanvasImporter.swift`, `CanvasSyncService.swift`, `Database.swift`, `Sources/AcademicTimeManager/App.swift`; new `Tests/AcademicTimeManagerTests/CanvasReconciliationTests.swift` (18 tests); updated `AcademicCoreTests`, `AssignmentProgressTests`, `SQLiteReliabilityTests`; docs `ARCHITECTURE.md`, `DATA_MODEL.md`, `INTEGRATIONS.md`.
+
+### Verification
+
+Debug `swift test --disable-sandbox`: **166 passed, 0 failures**. Release: **166 passed, 0 failures** (148 existing + 18 new). New tests cover deleted assignment, cleared and restored deadline, changed deadline, dropped course, reinstatement, events inside and outside the window, skipped course, event failure, non-scoped failures (500/401/403 on courses), page-two failure, empty course list, cancellation, no-coverage results, transaction rollback, mixed-provenance items, repeated syncs, and a version-3 store opening additively. Mocked transport and temporary databases only; no Canvas, Keychain, Calendar or Outlook access.
+
+### Remaining risks
+
+- First sync after upgrading will withdraw any stale legacy records, which is intended but visible; no manual restore control exists yet beyond Canvas returning the record.
+- Events withdrawn only when every event request succeeds and the cached start lies inside the window; legacy events whose time Canvas moved outside the window stay until they age out.
+- A course ended by the institution disappears from the active list and is withdrawn until it reappears.
+- Live behaviour of Canvas status codes (403/404 per course) is untested against the real service.
+- Other review findings (per-row decode quarantine, versioned migrations, Calendar session release, EventKit main-thread work, Outlook state integrity, CI pinning) remain open.
+
 ## Latest task — SQLite reliability hardening (2026-10-20)
 
 Scope: the first, narrow fixes from the independent architecture review on `feature/claude-improvements`. No schema, migration, tombstone or Canvas-reconciliation changes; the review's other findings remain open.

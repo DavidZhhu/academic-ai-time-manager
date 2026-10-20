@@ -5,17 +5,24 @@ public struct CanvasSyncReport: Equatable, Sendable {
     public let sourceRecordCount: Int
     public let academicItemCount: Int
     public let completedAt: Date
+    /// Courses whose assignments Canvas refused (403/404) or calendar events that could not be read.
+    public let skippedCourseCount: Int
+    public let eventsComplete: Bool
 }
 
 public struct CanvasSyncBatch: Sendable {
     public let result: CanvasImportResult
     public let completedAt: Date
+    /// Only a complete fetch may be recorded as the last successful sync.
+    public var isComplete: Bool { result.coverage?.isComplete ?? true }
     public var report: CanvasSyncReport {
         CanvasSyncReport(
             courseCount: result.sourceRecords.filter { $0.externalID.hasPrefix("course-") && !$0.externalID.contains("-assignment-") }.count,
             sourceRecordCount: result.sourceRecords.count,
             academicItemCount: result.academicItems.count,
-            completedAt: completedAt
+            completedAt: completedAt,
+            skippedCourseCount: result.coverage?.incompleteAssignmentCourseIDs.count ?? 0,
+            eventsComplete: result.coverage?.eventsComplete ?? true
         )
     }
 }
