@@ -288,6 +288,59 @@ final class CanvasReconciliationTests: XCTestCase {
         XCTAssertEqual(try db.items(), [item])
     }
 
+    // MARK: Completeness reporting
+
+    func testMissingCoverageIsReportedIncompleteAndNeverAdvancesLastSuccessfulSync() throws {
+        let batch = CanvasSyncBatch(result: CanvasImportResult(sourceRecords: [], academicItems: []), completedAt: later)
+        XCTAssertNil(batch.result.coverage)
+        XCTAssertFalse(batch.isComplete, "Unknown coverage must not count as a verified complete sync")
+        XCTAssertFalse(batch.report.eventsComplete)
+
+        // The same gating the app applies in synchronizeCanvas().
+        let db = try LocalDatabase()
+        try db.importCanvas(batch.result, successfulAt: batch.isComplete ? batch.completedAt : nil, at: later)
+        XCTAssertNil(try db.lastSuccessfulCanvasSync())
+    }
+
+    func testMissingCoverageDoesNotOverwriteAnEarlierVerifiedSync() async throws {
+        let db = try LocalDatabase()
+        try await sync(db, baseline)
+        XCTAssertEqual(try db.lastSuccessfulCanvasSync(), now)
+        let unverified = CanvasSyncBatch(result: CanvasImportResult(sourceRecords: [], academicItems: []), completedAt: later)
+        try db.importCanvas(unverified.result, successfulAt: unverified.isComplete ? unverified.completedAt : nil, at: later)
+        XCTAssertEqual(try db.lastSuccessfulCanvasSync(), now)
+        XCTAssertEqual(try db.items().count, 5, "Nothing is withdrawn without coverage")
+    }
+
+    func testFullCoverageReportsCompleteAndRecordsSuccessfulSync() async throws {
+        let db = try LocalDatabase()
+        let batch = try await fetch(baseline)
+        XCTAssertNotNil(batch.result.coverage)
+        XCTAssertTrue(batch.isComplete)
+        XCTAssertTrue(batch.report.eventsComplete)
+        XCTAssertEqual(batch.report.skippedCourseCount, 0)
+        try db.importCanvas(batch.result, successfulAt: batch.isComplete ? batch.completedAt : nil, at: now)
+        XCTAssertEqual(try db.lastSuccessfulCanvasSync(), now)
+    }
+
+    func testPartialAssignmentCoverageReportsIncomplete() async throws {
+        var next = baseline
+        next.forced["assignments-2"] = 403
+        let batch = try await fetch(next)
+        XCTAssertFalse(batch.isComplete)
+        XCTAssertEqual(batch.report.skippedCourseCount, 1)
+        XCTAssertTrue(batch.report.eventsComplete)
+    }
+
+    func testPartialCalendarEventCoverageReportsIncomplete() async throws {
+        var next = baseline
+        next.forced["events"] = 403
+        let batch = try await fetch(next)
+        XCTAssertFalse(batch.isComplete)
+        XCTAssertFalse(batch.report.eventsComplete)
+        XCTAssertEqual(batch.report.skippedCourseCount, 0)
+    }
+
     func testRollbackLeavesNoPartialWithdrawal() async throws {
         let path = NSTemporaryDirectory() + "reconcile-\(UUID().uuidString).sqlite"
         defer { for suffix in ["", "-wal", "-shm"] { try? FileManager.default.removeItem(atPath: path + suffix) } }

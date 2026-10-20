@@ -4,6 +4,14 @@ Updated: 2026-10-20 (Europe/London)
 
 Current position: **M0–M1 complete; Canvas sync, local completion tracking, Microsoft Outlook integration, and unified Apple Calendar Timeline display are integrated on main. Stage 2 interactive controls and cancellation follow-up are on draft PR #7. The production UI uses Live Data only. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
 
+## Canvas sync completeness fix (2026-10-20)
+
+Branch `fix/canvas-sync-completeness`. `CanvasSyncBatch.isComplete` treated a result with no coverage (`coverage == nil`) as complete, even though `CanvasImportResult` documents `nil` as "completeness cannot be guaranteed". Because `synchronizeCanvas()` in `App.swift` gates `lastSuccessfulCanvasSync`, the error flag and the success message on `isComplete`, an unverified import could have been recorded as a successful sync. Fix in `Sources/AcademicCore/CanvasSyncService.swift`: `isComplete` and `report.eventsComplete` now default to `false` when coverage is missing. Legacy coverage-less imports still save data and still never withdraw anything. Reconciliation, `Database.importCanvas()` and the UI are unchanged. The live importer always supplies coverage, so normal syncs behave as before.
+
+Tests: five new cases in `CanvasReconciliationTests` cover missing coverage reported as incomplete; missing coverage not setting or overwriting the last successful sync; full coverage still recorded as success; partial assignment coverage (403) reported as incomplete; and partial calendar-event coverage reported as incomplete. Debug and release: **224 passed, 0 failures**.
+
+Remaining risks: `Database.importCanvas(successfulAt:)` deliberately has no guard of its own, because existing callers and tests pass it an explicit timestamp, so a future caller could still record an unverified sync. A coverage-less batch reaching the UI would show the generic "finished with gaps" message. An incomplete HTTP 200 course list (no automatic withdrawal on a drop in course count) remains a separate design decision.
+
 ## Stage 2 PR #7 follow-up — Timeline cancellation (2026-10-20)
 
 Expected behavior: Event details for an unchanged app-owned session offers **Cancel study session…**; review names the exact title, date, time and dedicated calendar. Only explicit approval removes that session. Dismissal, ownership mismatch, personal events, external edits and pending writes leave events untouched; a confirmed cancellation refreshes Timeline and can be undone through a separately approved preview. Unsafe events explain the recovery path in Event details.

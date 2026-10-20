@@ -14,7 +14,8 @@ public struct CanvasSyncBatch: Sendable {
     public let result: CanvasImportResult
     public let completedAt: Date
     /// Only a complete fetch may be recorded as the last successful sync.
-    public var isComplete: Bool { result.coverage?.isComplete ?? true }
+    /// Missing coverage means completeness cannot be guaranteed, so it is never treated as complete.
+    public var isComplete: Bool { result.coverage?.isComplete ?? false }
     public var report: CanvasSyncReport {
         CanvasSyncReport(
             courseCount: result.sourceRecords.filter { $0.externalID.hasPrefix("course-") && !$0.externalID.contains("-assignment-") }.count,
@@ -22,7 +23,7 @@ public struct CanvasSyncBatch: Sendable {
             academicItemCount: result.academicItems.count,
             completedAt: completedAt,
             skippedCourseCount: result.coverage?.incompleteAssignmentCourseIDs.count ?? 0,
-            eventsComplete: result.coverage?.eventsComplete ?? true
+            eventsComplete: result.coverage?.eventsComplete ?? false
         )
     }
 }
