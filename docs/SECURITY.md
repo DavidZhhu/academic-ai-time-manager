@@ -48,7 +48,7 @@ Verify university policies, applicable data handling rules, and API terms before
 
 - Read-only by construction: the client protocol has no write members, the adapter has no save/remove/commit/assignment, and tests scan both. No real reminder was read, modified, completed or deleted during development; tests use a synthetic mock client.
 - Permission is requested only by an explicit button press (Full Access). Launch, notification and periodic paths never prompt. Revocation clears all reminder content and stops observation. Write-only access is rejected.
-- Titles, notes, URLs and list names are held in process memory only: never SQLite, source records, journals, logs, analysis providers or the network. Reminder text is untrusted display data and is never interpreted as instructions. Only http(s) URLs are kept. Demo Mode displays no reminders.
+- Titles, notes, URLs and list names are held in process memory only: never SQLite, source records, journals, logs, analysis providers or the network. Reminder text is untrusted display data and is never interpreted as instructions. Only http(s) URLs are kept. The production application uses live data only.
 - Reminders cannot affect scheduling or Calendar writes in Stage 1.
 
 ## Stage 2 interaction boundary

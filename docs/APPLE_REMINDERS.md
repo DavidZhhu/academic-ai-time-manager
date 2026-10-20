@@ -26,7 +26,7 @@ Per reminder: title, notes, due date (date-only or date+time, with time zone whe
 
 ## Safety properties (each is test-enforced)
 - `RemindersClient` has no write members; the EventKit adapter contains no `save`, `remove`, `commit`, field assignment, or write-access request.
-- Reminder code references no database, network, file, defaults, logging or AI-provider type. Content is memory-only and is discarded on exit, revocation, or Demo Mode (Demo Mode shows no reminders).
+- Reminder code references no database, network, file, defaults, logging or AI-provider type. Content is memory-only and is discarded on exit or revocation. The production application uses live data only.
 - Reminders are **markers, not events**: they never enter `UnifiedTimeline`, the scheduler, availability, or `busyIntervals`.
 - Failed reads keep the last good snapshot visibly flagged out-of-date; permission loss clears it. Overlapping syncs are skipped.
 - Dedup: same list + same external ID collapses to the most recently modified item; otherwise the device identifier is the key. Reminders in lists that no longer exist are dropped; items that disappear between reads are removed and counted. In-session only — Stage 1 stores no history.
@@ -37,7 +37,7 @@ Per reminder: title, notes, due date (date-only or date+time, with time zone whe
 - **Day / Week / Month**: dashed teal circle chips ("Due" row in Day/Week; under events in Month). They occupy no time slot. Toggle in the sidebar (*Reminder due dates*). Clicking a chip or task opens it on the Reminders page.
 
 ## Refresh
-On launch (live mode), on `EKEventStoreChanged` (coalesced to one read per second), and every 5 minutes while the app runs. The same notification also fires for Calendar changes; the extra read is cheap and harmless.
+On launch, on `EKEventStoreChanged` (coalesced to one read per second), and every 5 minutes while the app runs. The same notification also fires for Calendar changes; the extra read is cheap and harmless.
 
 ## Extension points for later stages (not implemented)
 - Add a *separate* `RemindersWriting` protocol so Stage 1 code can never obtain write capability; use `externalID` + list ID as the write-back key.
@@ -45,7 +45,7 @@ On launch (live mode), on `EKEventStoreChanged` (coalesced to one read per secon
 - Canvas duplicate linking can key on `ReminderItem.id`/`externalID`; AI estimation must keep to the local-provider boundary; per-subtask scheduling depends on Apple exposing hierarchy; Calendar publishing continues to use the existing preview-and-approve path.
 
 ## Manual verification (user-led)
-1. Open the rebuilt app (live mode). Reminders must not prompt at launch.
+1. Open the rebuilt app. Reminders must not prompt at launch.
 2. Connections › Apple Reminders › *Request Reminders access…* → choose Full Access.
 3. Confirm lists/counts match the Reminders app; open a reminder and compare due date, priority, notes.
 4. Check the Timeline due chips (Day/Week/Month) and the panel's Reminders section; confirm they do not change free/busy time or Plan preview.

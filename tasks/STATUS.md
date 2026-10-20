@@ -50,7 +50,7 @@ Branch `feature/apple-reminders-integration`, based on `main` (`c2ece4d`). Detai
 - Read-only EventKit Reminders: explicit Full Access request from Connections only; launch, change-notification (coalesced) and 5-minute refresh never prompt. Revocation, write-only access, failed reads, missing lists, deleted reminders, duplicates and recurring reminders are handled; permission loss clears in-memory content.
 - Imports title, notes, due date (date-only vs timed, time zone), priority, completion, http(s) URL, recurrence flag, device + external IDs and list/source info across all lists. Subtasks: model and UI support `parentID`, but the public EventKit API exposes no hierarchy, so none is imported (documented).
 - UI: Reminders page (list navigation, reminder list, details, completion indicators, due dates), Reminders section in the collapsible Academic Tasks panel, due-date markers in Day/Week/Month (not busy time, sidebar toggle), Connections card, Info.plist `NSRemindersFullAccessUsageDescription`.
-- Content is memory-only, never persisted, never sent to AI/cloud; Demo Mode shows none. Nothing is written to Reminders; test-enforced.
+- Content is memory-only, never persisted, never sent to AI/cloud. Nothing is written to Reminders; test-enforced.
 - Not implemented (by design): write-back, conflict resolution, deletion history, AI estimates/scheduling, subtask scheduling, Canvas duplicate linking, Calendar publishing of reminders.
 
 ### Files

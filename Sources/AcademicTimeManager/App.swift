@@ -56,7 +56,7 @@ final class PlannerViewModel {
             items = []; reviews = []; sourceRecords = []; conflicts = []
             message = "Local storage unavailable. Reopen the app to retry; no cached data has been deleted."
         }
-    appleCalendar.liveItems = { [weak self] in
+        appleCalendar.liveItems = { [weak self] in
             guard let db = self?.database else { throw AppleCalendarError.storage }
             return try AcademicDataset(items: db.items(), sources: db.sourceRecords()).items
         }
