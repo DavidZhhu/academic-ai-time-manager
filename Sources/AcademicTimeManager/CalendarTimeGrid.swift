@@ -6,6 +6,8 @@ import SwiftUI
 struct CalendarTimeGrid: View {
     let days: [Date]
     let events: [UnifiedTimelineEvent]
+    var markers: [ReminderDueMarker] = []
+    var openReminder: (String) -> Void = { _ in }
     @Binding var state: CalendarPresentationState
     private let hourHeight: CGFloat = 72
     private let gutter: CGFloat = 52
@@ -19,6 +21,7 @@ struct CalendarTimeGrid: View {
                 VStack(spacing: 0) {
                     dayHeaders
                     allDayRow
+                    reminderRow
                     Divider()
                     ScrollViewReader { proxy in
                         ScrollView(.vertical) {
@@ -74,6 +77,24 @@ struct CalendarTimeGrid: View {
             }
         }
         .frame(height: min(130, max(34, CGFloat(count) * 30 + 8)))
+    }
+    /// Due dates are markers, not blocks: they never take a time slot or reduce free time.
+    @ViewBuilder private var reminderRow: some View {
+        let count = days.map { RemindersPresentation.markers(markers, on: $0).count }.max() ?? 0
+        if count > 0 {
+            ScrollView(.vertical) {
+                HStack(alignment: .top, spacing: 0) {
+                    Text("Due").font(.caption2).foregroundStyle(.teal).frame(width: gutter).padding(.top, 6)
+                        .help("Reminder due dates — not busy time")
+                    ForEach(days, id: \.self) { day in
+                        VStack(spacing: 3) {
+                            ForEach(RemindersPresentation.markers(markers, on: day)) { ReminderMarkerChip(marker: $0, open: openReminder) }
+                        }.padding(4).frame(maxWidth: .infinity, minHeight: 28, alignment: .top)
+                            .overlay(alignment: .trailing) { Divider() }
+                    }
+                }
+            }.frame(height: min(110, max(30, CGFloat(count) * 24 + 8)))
+        }
     }
     private var timeLabels: some View {
         VStack(spacing: 0) {

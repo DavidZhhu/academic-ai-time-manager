@@ -17,3 +17,6 @@ Implemented through an injected native EventKit adapter with explicit full-acces
 
 ## Cross-source rules
 Store source identifier, provider, retrieval timestamp, original timezone, confidence, and evidence link for every extracted fact. Separate source facts from user-verified canonical facts and AI hypotheses. Preserve conflicts for human review. Do not assume that newest always means correct.
+
+## Apple Reminders
+Stage 1 is read-only EventKit access with explicit Full Access consent, all-list import, launch/notification/5-minute refresh, and on-device-only content. Limitations (no subtasks, attachments or sections in the public API) are in [APPLE_REMINDERS.md](APPLE_REMINDERS.md). No live Reminders data was accessed during development.

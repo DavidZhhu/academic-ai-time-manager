@@ -12,6 +12,8 @@ public struct CalendarPresentationState: Equatable, Sendable {
     public var mode: AcademicCalendarMode = .week
     public var visibleSources = Set(UnifiedTimelineSource.allCases)
     public var showsTasks = true
+    /// Reminder due-date markers are display-only and independent of event sources.
+    public var showsReminderMarkers = true
     public var selectedEventID: String?
 
     public init(date: Date = Date()) { self.date = date }

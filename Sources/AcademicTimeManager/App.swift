@@ -27,6 +27,7 @@ final class PlannerViewModel {
     var conflicts: [AcademicConflict] = []
     var availability = AvailabilitySettings() { didSet { planResult = nil } }
     let appleCalendar = AppleCalendarViewModel()
+    let reminders = RemindersViewModel()
     var planResult: AssignmentStudyPlan? { didSet { appleCalendar.invalidate() } }
     var assignmentProgress: [String: AssignmentProgress] = [:]
     var assignmentProgressError: String?
@@ -136,6 +137,13 @@ final class PlannerViewModel {
             calendarEvents: dataMode == .live ? appleCalendar.timelineEvents : [])
     }
 
+    /// Reminder due markers are display-only and never enter `timelineEvents`, planning or busy time.
+    /// Demo Mode never shows personal reminders.
+    func reminderMarkers(in interval: DateInterval) -> [ReminderDueMarker] {
+        guard dataMode == .live else { return [] }
+        return RemindersPresentation.markers(items: reminders.snapshot.items, lists: reminders.snapshot.lists, in: interval)
+    }
+
     func assignmentStatus(for id: String) -> AssignmentStatus { assignmentProgress[id]?.status ?? .notStarted }
 
     func setAssignmentStatus(_ status: AssignmentStatus, for id: String) {
@@ -187,13 +195,13 @@ struct ContentView: View {
     @State private var assignmentEffort: [String: Int] = [:]
     @State private var assignmentPriority: [String: Int] = [:]
     @State private var canvasConnection = CanvasConnectionViewModel()
-    private let sections = ["Timeline", "Plan preview", "Review inbox", "Availability", "Connections"]
+    private let sections = ["Timeline", "Reminders", "Plan preview", "Review inbox", "Availability", "Connections"]
     var body: some View {
         NavigationSplitView {
             VStack(spacing: 0) {
                 List(sections, id: \.self, selection: $selected) { section in
                     Label(section, systemImage: icon(for: section)).tag(section)
-                }.frame(minHeight: 180, idealHeight: 210, maxHeight: 230)
+                }.frame(minHeight: 200, idealHeight: 240, maxHeight: 260)
                 Divider()
                 ScrollView { CalendarSidebar(state: $calendarState) }
             }
@@ -204,7 +212,10 @@ struct ContentView: View {
                 dataModeControls.padding(.horizontal, 20).padding(.vertical, 12)
                 Divider()
                 if selected == "Timeline" {
-                    CalendarWorkspace(model: model, state: $calendarState, effort: assignmentEffort, priority: assignmentPriority)
+                    CalendarWorkspace(model: model, state: $calendarState, effort: assignmentEffort, priority: assignmentPriority,
+                                      openReminder: openReminder)
+                } else if selected == "Reminders" {
+                    RemindersPage(model: model.reminders, isDemo: model.dataMode == .demo)
                 } else {
                     ScrollView(.vertical) {
                         VStack(alignment: .leading, spacing: 20) {
@@ -252,6 +263,11 @@ struct ContentView: View {
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
             }
         }
+        .task(id: model.dataMode) {
+            // Read-only Reminders: sync on launch, on EventKit changes and every 5 minutes. Never prompts.
+            guard model.dataMode == .live else { model.reminders.stopMonitoring(); return }
+            model.reminders.startMonitoring()
+        }
         .onChange(of: model.dataMode) { _, _ in refreshAppleCalendarTimeline() }
         .onChange(of: canvasConnection.isConnected) { _, connected in
             if connected { model.dataMode = .live }
@@ -263,6 +279,11 @@ struct ContentView: View {
         .onChange(of: CalendarPresentation.visibleInterval(date: calendarState.date, mode: calendarState.mode)) { _, _ in
             refreshAppleCalendarTimeline()
         }
+    }
+
+    private func openReminder(_ id: String) {
+        model.reminders.select(id)
+        selected = "Reminders"
     }
 
     private var dataModeControls: some View {
@@ -466,10 +487,11 @@ struct ContentView: View {
 
     private var connectionsView: some View {
         VStack(alignment: .leading, spacing: 16) {
-            heading("Connections", subtitle: "Manage Canvas, Microsoft Outlook, and Apple Calendar connections")
+            heading("Connections", subtitle: "Manage Canvas, Microsoft Outlook, Apple Calendar, and Apple Reminders connections")
             canvasConnectionView
             OutlookConnectionsView(model: outlook, isDemo: model.dataMode == .demo, changed: model.reloadImportedData)
             AppleCalendarConnectionView(model: model.appleCalendar)
+            RemindersConnectionView(model: model.reminders)
             Spacer()
         }
     }
@@ -532,7 +554,7 @@ struct ContentView: View {
             .padding(16).background(.background, in: RoundedRectangle(cornerRadius: 10))
     }
     private func icon(for section: String) -> String {
-        switch section { case "Plan preview": "sparkles.rectangle.stack"; case "Review inbox": "tray.full"; case "Availability": "clock"; case "Connections": "link"; default: "calendar.day.timeline.left" }
+        switch section { case "Plan preview": "sparkles.rectangle.stack"; case "Reminders": "checklist"; case "Review inbox": "tray.full"; case "Availability": "clock"; case "Connections": "link"; default: "calendar.day.timeline.left" }
     }
     private func color(for state: VerificationState) -> Color {
         switch state { case .verified: .green; case .inferred: .blue; case .disputed: .orange }
