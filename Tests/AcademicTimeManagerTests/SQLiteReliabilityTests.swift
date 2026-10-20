@@ -182,7 +182,7 @@ final class SQLiteReliabilityTests: XCTestCase {
         XCTAssertEqual(try reopened.items(), [item()])
         XCTAssertEqual(try reopened.availabilitySettings(), customSettings)
         XCTAssertEqual(try reopened.assignmentProgress()["a"]?.status, .completed)
-        XCTAssertEqual(try reopened.migrationCount(), 3, "WAL must not change the schema")
+        XCTAssertEqual(try reopened.migrationCount(), 4, "WAL must not change the schema")
     }
 
     func testWALReadersAreNotBlockedByAnOpenWriter() throws {

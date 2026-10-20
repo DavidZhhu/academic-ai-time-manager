@@ -92,6 +92,21 @@ public enum CanvasImportError: Error, LocalizedError, Equatable {
 public struct CanvasImportResult: Equatable, Sendable {
     public let sourceRecords: [SourceRecord]
     public let academicItems: [AcademicItem]
+    /// Nil means the producer cannot vouch for completeness, so the importer never withdraws anything.
+    public let coverage: CanvasSyncCoverage?
+
+    public init(sourceRecords: [SourceRecord], academicItems: [AcademicItem], coverage: CanvasSyncCoverage? = nil) {
+        self.sourceRecords = sourceRecords; self.academicItems = academicItems; self.coverage = coverage
+    }
+}
+
+extension CanvasImportError {
+    /// Only course-specific access problems are tolerated per course. Authentication, rate limits,
+    /// server/network failures, pagination limits and malformed data still abort the whole sync.
+    var isCourseScoped: Bool {
+        if case .httpStatus(let code) = self { return code == 403 || code == 404 }
+        return false
+    }
 }
 
 /// Read-only Canvas importer. It never persists or prints the supplied access token.
@@ -117,7 +132,9 @@ public struct CanvasImporter: Sendable {
         var records: [SourceRecord] = []
         var items: [AcademicItem] = []
         var seenRecords = Set<String>()
+        var completeAssignmentCourses = Set<Int>(), incompleteAssignmentCourses = Set<Int>()
         for course in courses {
+            try Task.checkCancellation()
             let courseID = "canvas-course-\(course.id)"
             if seenRecords.insert(courseID).inserted {
                 records.append(SourceRecord(id: courseID, provider: "Canvas", externalID: "course-\(course.id)", retrievedAt: retrievedAt, displayTitle: course.name))
@@ -125,7 +142,13 @@ public struct CanvasImporter: Sendable {
             var assignmentComponents = URLComponents(url: baseURL.appendingPathComponent("api/v1/courses/\(course.id)/assignments"), resolvingAgainstBaseURL: false)!
             assignmentComponents.queryItems = [URLQueryItem(name: "per_page", value: "100"), URLQueryItem(name: "include[]", value: "submission")]
             let assignmentsURL = assignmentComponents.url!
-            let assignments: [CanvasAssignment] = try await fetchPages(startingAt: assignmentsURL)
+            let assignments: [CanvasAssignment]
+            do { assignments = try await fetchPages(startingAt: assignmentsURL) }
+            catch let error as CanvasImportError where error.isCourseScoped {
+                try Task.checkCancellation()
+                incompleteAssignmentCourses.insert(course.id); continue
+            }
+            completeAssignmentCourses.insert(course.id)
             for assignment in assignments {
                 let externalID = "course-\(course.id)-assignment-\(assignment.id)"
                 let sourceID = "canvas-\(externalID)"
@@ -140,6 +163,7 @@ public struct CanvasImporter: Sendable {
             }
         }
         let eventWindow = CalendarEventWindow(around: retrievedAt)
+        var eventsComplete = true
         for group in stride(from: 0, to: courses.count, by: 10) {
             let contexts = courses[group..<min(group + 10, courses.count)].map { "course_\($0.id)" }
             var components = URLComponents(url: baseURL.appendingPathComponent("api/v1/calendar_events"), resolvingAgainstBaseURL: false)!
@@ -147,7 +171,13 @@ public struct CanvasImporter: Sendable {
                 URLQueryItem(name: "type", value: "event"), URLQueryItem(name: "start_date", value: eventWindow.start),
                 URLQueryItem(name: "end_date", value: eventWindow.end), URLQueryItem(name: "per_page", value: "100")
             ] + contexts.map { URLQueryItem(name: "context_codes[]", value: $0) }
-            let events: [CanvasCalendarEvent] = try await fetchPages(startingAt: components.url!)
+            try Task.checkCancellation()
+            let events: [CanvasCalendarEvent]
+            do { events = try await fetchPages(startingAt: components.url!) }
+            catch let error as CanvasImportError where error.isCourseScoped {
+                try Task.checkCancellation()
+                eventsComplete = false; continue
+            }
             for event in events {
                 let externalID = "calendar-event-\(event.id)"
                 let sourceID = "canvas-\(externalID)"
@@ -158,7 +188,10 @@ public struct CanvasImporter: Sendable {
                 }
             }
         }
-        return CanvasImportResult(sourceRecords: records, academicItems: items)
+        let coverage = CanvasSyncCoverage(listedCourseIDs: Set(courses.map(\.id)), completeAssignmentCourseIDs: completeAssignmentCourses,
+            incompleteAssignmentCourseIDs: incompleteAssignmentCourses, eventsComplete: eventsComplete,
+            eventWithdrawalWindow: eventWindow.withdrawalInterval)
+        return CanvasImportResult(sourceRecords: records, academicItems: items, coverage: coverage)
     }
 
     private func validTimeZone(_ identifier: String?) -> String {
@@ -176,10 +209,15 @@ public struct CanvasImporter: Sendable {
     private struct CalendarEventWindow {
         let start: String
         let end: String
+        /// Canvas date parameters are whole UTC days of uncertain inclusivity; stay one day inside both edges.
+        let withdrawalInterval: DateInterval
         init(around date: Date) {
             let formatter = DateFormatter(); formatter.calendar = Calendar(identifier: .gregorian); formatter.timeZone = TimeZone(secondsFromGMT: 0); formatter.dateFormat = "yyyy-MM-dd"
             start = formatter.string(from: date.addingTimeInterval(-30 * 24 * 60 * 60))
             end = formatter.string(from: date.addingTimeInterval(365 * 24 * 60 * 60))
+            let first = (formatter.date(from: start) ?? date).addingTimeInterval(86_400)
+            let last = (formatter.date(from: end) ?? date).addingTimeInterval(-86_400)
+            withdrawalInterval = DateInterval(start: first, end: max(first, last))
         }
     }
 

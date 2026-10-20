@@ -54,7 +54,7 @@ final class AssignmentProgressTests: XCTestCase {
         sqlite3_close(handle)
         let migrated = try LocalDatabase(path: path)
         try migrated.migrate()
-        XCTAssertEqual(try migrated.migrationCount(), 3)
+        XCTAssertEqual(try migrated.migrationCount(), 4)
         XCTAssertEqual(try migrated.items(), [item])
         XCTAssertEqual(try migrated.availabilitySettings(), availability)
         XCTAssertTrue(try migrated.assignmentProgress().isEmpty)

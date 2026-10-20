@@ -55,6 +55,9 @@ public final class LocalDatabase {
         try execute("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (2, datetime('now'));")
         try execute("CREATE TABLE IF NOT EXISTS assignment_progress (assignment_id TEXT PRIMARY KEY, payload_json TEXT NOT NULL);")
         try execute("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (3, datetime('now'));")
+        // Additive only: withdrawal bookkeeping lives beside, never inside, imported records.
+        try execute("CREATE TABLE IF NOT EXISTS canvas_record_status (record_id TEXT NOT NULL, record_kind TEXT NOT NULL, state TEXT NOT NULL, payload_json TEXT NOT NULL, PRIMARY KEY(record_id, record_kind));")
+        try execute("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (4, datetime('now'));")
     }
 
     public func save(_ record: SourceRecord) throws {
@@ -65,23 +68,93 @@ public final class LocalDatabase {
         }
     }
 
-    public func importCanvas(_ result: CanvasImportResult, successfulAt: Date? = nil) throws {
+    /// Saves a Canvas fetch and, when the result carries coverage, withdraws records Canvas no longer
+    /// provides, all in one transaction. Withdrawal is a status flag: rows, local progress and history stay.
+    /// Pass `successfulAt` only for a complete fetch.
+    @discardableResult
+    public func importCanvas(_ result: CanvasImportResult, successfulAt: Date? = nil, at now: Date = Date()) throws -> CanvasReconciliationSummary {
         try execute("BEGIN IMMEDIATE;")
         do {
             for source in result.sourceRecords { try save(source) }
             for item in result.academicItems { try save(item) }
+            var summary = CanvasReconciliationSummary()
+            try reinstateReturnedRecords(result, at: now, summary: &summary)
+            if let coverage = result.coverage {
+                let (plan, skipped) = CanvasReconciler.plan(activeSources: try sourceRecords(), activeItems: try items(), result: result, coverage: coverage)
+                summary.skippedReason = skipped
+                if let plan { try apply(plan, at: now, summary: &summary) }
+            } else {
+                summary.skippedReason = "No coverage information; nothing was withdrawn."
+            }
             if let successfulAt {
                 let json = try encoded(successfulAt)
                 try withStatement("INSERT INTO app_settings(key, payload_json) VALUES ('canvas_last_successful_sync', ?) ON CONFLICT(key) DO UPDATE SET payload_json=excluded.payload_json;") { bind(json, to: 1, in: $0) }
             }
             try execute("COMMIT;")
+            return summary
         } catch {
             try? execute("ROLLBACK;")
             throw error
         }
     }
 
-    public func sourceRecords() throws -> [SourceRecord] { try readJSON("SELECT payload_json FROM source_records ORDER BY id;") }
+    private func reinstateReturnedRecords(_ result: CanvasImportResult, at now: Date, summary: inout CanvasReconciliationSummary) throws {
+        let withdrawn = Set(try canvasRecordStatuses().filter { $0.state == .withdrawn }.map { "\($0.kind.rawValue):\($0.recordID)" })
+        guard !withdrawn.isEmpty else { return }
+        let returned = result.sourceRecords.map { (CanvasRecordStatus.Kind.source, $0.id) } + result.academicItems.map { (CanvasRecordStatus.Kind.item, $0.id) }
+        for (kind, id) in returned where withdrawn.contains("\(kind.rawValue):\(id)") {
+            try setStatus(CanvasRecordStatus(recordID: id, kind: kind, state: .active, reason: "Returned by Canvas", changedAt: now))
+            try audit("canvas-reinstated-\(kind.rawValue)", id, before: "withdrawn", after: "active", at: now)
+            summary.reinstated += 1
+        }
+    }
+
+    private func apply(_ plan: CanvasReconciliationPlan, at now: Date, summary: inout CanvasReconciliationSummary) throws {
+        for (id, reason) in plan.withdrawSources.sorted(by: { $0.key < $1.key }) {
+            try setStatus(CanvasRecordStatus(recordID: id, kind: .source, state: .withdrawn, reason: reason, changedAt: now))
+            try audit("canvas-withdrawn-source", id, before: "active", after: "withdrawn: " + reason, at: now)
+            summary.withdrawnSources += 1
+        }
+        for (id, reason) in plan.withdrawItems.sorted(by: { $0.key < $1.key }) {
+            try setStatus(CanvasRecordStatus(recordID: id, kind: .item, state: .withdrawn, reason: reason, changedAt: now))
+            try audit("canvas-withdrawn-item", id, before: "active", after: "withdrawn: " + reason, at: now)
+            summary.withdrawnItems += 1
+        }
+        for item in plan.detachItems {
+            try save(item)
+            try audit("canvas-detached-item", item.id, before: "canvas-sourced", after: "kept with approved non-Canvas sources", at: now)
+            summary.detachedItems += 1
+        }
+    }
+
+    private func setStatus(_ status: CanvasRecordStatus) throws {
+        let json = try encoded(status)
+        try withStatement("INSERT INTO canvas_record_status(record_id, record_kind, state, payload_json) VALUES (?, ?, ?, ?) ON CONFLICT(record_id, record_kind) DO UPDATE SET state=excluded.state, payload_json=excluded.payload_json;") { statement in
+            bind(status.recordID, to: 1, in: statement); bind(status.kind.rawValue, to: 2, in: statement)
+            bind(status.state.rawValue, to: 3, in: statement); bind(json, to: 4, in: statement)
+        }
+    }
+
+    private func audit(_ action: String, _ target: String, before: String, after: String, at now: Date) throws {
+        try append(AuditEntry(id: UUID().uuidString, actor: "canvas-sync", action: action, targetID: target,
+                              beforeReference: before, afterReference: after, timestamp: now))
+    }
+
+    /// Withdrawal history, including records that Canvas later returned (state `.active`).
+    public func canvasRecordStatuses() throws -> [CanvasRecordStatus] {
+        try readJSON("SELECT payload_json FROM canvas_record_status ORDER BY record_kind, record_id;")
+    }
+
+    private static let activeSourceFilter = "NOT EXISTS (SELECT 1 FROM canvas_record_status s WHERE s.record_id = source_records.id AND s.record_kind = 'source' AND s.state = 'withdrawn')"
+    private static let activeItemFilter = "NOT EXISTS (SELECT 1 FROM canvas_record_status s WHERE s.record_id = academic_items.id AND s.record_kind = 'item' AND s.state = 'withdrawn')"
+
+    /// Every stored source record, including withdrawn ones, for history and diagnostics.
+    public func allSourceRecords() throws -> [SourceRecord] { try readJSON("SELECT payload_json FROM source_records ORDER BY id;") }
+    /// Every stored item, including withdrawn ones, for history and diagnostics.
+    public func allItems() throws -> [AcademicItem] { try readJSON("SELECT payload_json FROM academic_items ORDER BY starts_at;") }
+
+    /// Active (not withdrawn) records only: these feed the Timeline, assignments and scheduling.
+    public func sourceRecords() throws -> [SourceRecord] { try readJSON("SELECT payload_json FROM source_records WHERE \(Self.activeSourceFilter) ORDER BY id;") }
     public func sourceRecordCount() throws -> Int { try scalarInt("SELECT COUNT(*) FROM source_records;") }
     public func migrationCount() throws -> Int { try scalarInt("SELECT COUNT(*) FROM schema_migrations;") }
 
@@ -94,8 +167,9 @@ public final class LocalDatabase {
         }
     }
 
+    /// Active (not withdrawn) items only.
     public func items() throws -> [AcademicItem] {
-        try readJSON("SELECT payload_json FROM academic_items ORDER BY starts_at;")
+        try readJSON("SELECT payload_json FROM academic_items WHERE \(Self.activeItemFilter) ORDER BY starts_at;")
     }
 
     public func save(_ item: ReviewItem) throws {
