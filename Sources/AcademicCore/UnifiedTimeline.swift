@@ -29,13 +29,15 @@ public struct UnifiedTimelineEvent: Identifiable, Equatable, Sendable {
     public let isProtected: Bool
     public let isAllDay: Bool
     public let sourceRecordIDs: [String]
+    public let managedKey: String?
+    public var isEditableStudySession: Bool { source == .managedCalendar && managedKey != nil && !isProtected && !isAllDay }
 
     public init(id: String, title: String, start: Date, end: Date, timeZone: String,
                 kind: AcademicItemKind, verification: VerificationState, source: UnifiedTimelineSource,
-                isProtected: Bool, isAllDay: Bool = false, sourceRecordIDs: [String] = []) {
+                isProtected: Bool, isAllDay: Bool = false, sourceRecordIDs: [String] = [], managedKey: String? = nil) {
         self.id = id; self.title = title; self.start = start; self.end = end; self.timeZone = timeZone
         self.kind = kind; self.verification = verification; self.source = source
-        self.isProtected = isProtected; self.isAllDay = isAllDay; self.sourceRecordIDs = sourceRecordIDs
+        self.isProtected = isProtected; self.isAllDay = isAllDay; self.sourceRecordIDs = sourceRecordIDs; self.managedKey = managedKey
     }
 
     /// Deadline instants need a non-empty interval when they are placed in a date range.
@@ -63,7 +65,7 @@ public enum UnifiedTimeline {
             return UnifiedTimelineEvent(id: event.id, title: event.title, start: event.start, end: event.end,
                 timeZone: event.timeZone, kind: event.source == .managed ? .studyBlock : .classSession,
                 verification: .verified, source: event.source == .managed ? .managedCalendar : .appleCalendar,
-                isProtected: true, isAllDay: event.isAllDay)
+                isProtected: event.source != .managed || event.managedKey == nil, isAllDay: event.isAllDay, managedKey: event.managedKey)
         }
         return (academic + calendar).sorted {
             $0.start == $1.start ? $0.id < $1.id : $0.start < $1.start

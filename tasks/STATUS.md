@@ -1,8 +1,46 @@
 # Development Status
 
-Updated: 2026-10-19 (Europe/London)
+Updated: 2026-10-20 (Europe/London)
 
 Current position: **M0–M1 complete; Canvas sync, local completion tracking, demo/live separation, Microsoft Outlook integration, and unified Apple Calendar Timeline display are integrated on main and verified with fixtures. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
+
+
+## Completed task — interactive calendar Stage 2 (2026-10-20)
+
+Implemented on `feature/interactive-calendar`, based on latest fetched `origin/main` at `c0cbb6e`. The branch and a clean working tree were verified before edits; `main` and unrelated worktrees remain untouched. Two pre-existing empty untracked files (`1558718`, `FETCH_HEAD`) were preserved under `/private/tmp/academic-calendar-stage2-preserved/` before work started. No live Canvas, Outlook, Apple Calendar, Keychain item, OAuth flow, production database, or personal data was accessed.
+
+### Delivered behavior
+
+- Day and Week now support a one-hour empty-slot proposal on click and a 15-minute-snapped range proposal on drag. Green app-owned timed sessions can be dragged across dates/times and resized from a bottom handle. Each gesture displays a dashed preview before opening the editor. Month remains read-only apart from opening its Day view.
+- `⌘N`, the owned event inspector, context menu, VoiceOver edit action, date/time fields and 15-minute adjustment buttons provide keyboard-accessible creation, movement and resize alternatives. A move keeps duration; a resize keeps start. The review presents before/after values, time-zone abbreviation, duration, a separate Cancel path and an explicit **Approve exact changes** control.
+- Interactive proposals share the existing exact approval, ownership journal, durable write intent, cancellation, undo and interrupted-write recovery flow. App-owned identity is stable for an individual scheduled slot; stale editors and changed retry requests cannot overwrite another edit or produce duplicates.
+- Each preview, approval and per-operation rechecks unfiltered, live-scoped Canvas/approved Outlook commitments, existing study sessions and freshly read EventKit busy occurrences. Hidden filters do not weaken constraints. Invalid/past/overlong ranges, all-day/recurring Calendar occurrences, personal events and new conflicts block writes.
+- Personal Apple Calendar events remain protected. Timeline grants editing only if an occurrence still matches its journal marker, calendar, last-confirmed snapshot and safe-modification state. Original Apple titles remain transient local rendering values only.
+- The Live/Demo selector, user-facing demonstration source filter, production sample seeding and local-storage fallback are removed. Production always scopes live provenance and preserves existing imported records and completion status without a database migration. `SampleData` now lives only in the test target, and legacy fixture rows remain excluded by their provenance.
+
+### Files changed
+
+- New `Sources/AcademicCore/CalendarInteraction.swift`: draft, validation, snapping, creation/move/resize transformations.
+- Updated `Sources/AcademicCore/AppleCalendar.swift` and `UnifiedTimeline.swift`: safe interactive single-session previews, live constraint reader and journal-key-gated editability.
+- New `Sources/AcademicTimeManager/CalendarSessionEditor.swift` and `CalendarStudyInteraction.swift`; updated calendar workspace/grid/event UI and Calendar view model for pointer, keyboard, accessible and review interactions.
+- Updated `App.swift`, Outlook UI, sidebar and task panel to make Live Data the sole production mode; moved sample fixtures into `Tests/AcademicTimeManagerTests/SampleData.swift`.
+- New `CalendarInteractionTests.swift`; expanded `AppleCalendarTests.swift`; updated README, Architecture, Apple Calendar, Security and this status report.
+
+### Verification
+
+- Debug `swift test`: **151 passed, 0 failures**.
+- Release `swift test -c release`: **151 passed, 0 failures**.
+- New coverage exercises creation, 15-minute snapping, Day/Week moves, resizing, keyboard draft validation, DST selection, invalid ranges, Canvas/Outlook/EventKit/study conflicts at preview and approval, hidden constraints, all-day/recurring occurrences, personal/in-managed-calendar protection, external edits, cancellation, undo, stable slot identity, duplicate retries, offline/revoked access and interrupted-write recovery.
+- Synthetic SwiftUI/AppKit renders exercised production calendar components in Day, Week, Month, narrow, dark and session-editor layouts. The harness substitutes in-memory data and does not construct the production app model, database, EventKit client or credential stores.
+- `git diff --check` passed. Release packaging through `scripts/package-macos.sh` rebuilt `build-output/AcademicTimeManager.app`, retained `AcademicTimeManager.icns`, `org.example.AcademicTimeManager`, the Microsoft OAuth callback and the Apple Development signing identity. The script's strict/deep signature, stable designated-requirement and plist checks passed. A direct signature probe inside the restricted sandbox could not access the Apple trust chain; this does not invalidate the successful packaging verification outside it.
+
+### Remaining limits and user-led checks
+
+- Use a dedicated test Calendar account and synthetic future sessions to exercise actual EventKit interactions, pointer focus/VoiceOver, narrow-window behavior, offline propagation and remote Calendar delivery. No production app launch or live account test is claimed.
+- Dragging does not auto-scroll at a Day/Week edge; use the editor date/time controls to target ranges outside the current visible grid. Dense overlapping labels remain an interface refinement opportunity.
+- EventKit can confirm local-store save only; macOS owns remote account synchronization. Developer ID distribution, notarization and broad MVP hardening remain separate work.
+
+Git delivery is in progress: the feature branch is being rebased onto the newly advanced `origin/main`; no merge, force-push or repository-setting change is authorized.
 
 ## Latest task — Apple Reminders Stage 1, read-only (2026-10-20)
 

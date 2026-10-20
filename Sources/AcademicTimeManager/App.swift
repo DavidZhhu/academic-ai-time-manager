@@ -31,10 +31,7 @@ final class PlannerViewModel {
     var planResult: AssignmentStudyPlan? { didSet { appleCalendar.invalidate() } }
     var assignmentProgress: [String: AssignmentProgress] = [:]
     var assignmentProgressError: String?
-    var dataMode: StudyDataMode = .live {
-        didSet { if dataMode != oldValue { planResult = nil; assignmentProgressError = nil } }
-    }
-    var message = "Use Sync to load Oxford Canvas data, or select Demo Mode to explore sample data."
+    var message = "Use Sync to load Oxford Canvas data."
     var database: LocalDatabase?
     var isSyncingCanvas = false
     var canvasSyncHasError = false
@@ -42,15 +39,8 @@ final class PlannerViewModel {
     private let canvasSync = CanvasSyncService()
 
     init() {
-        let fixture = SampleData.make()
         do {
             let db = try LocalDatabase(path: Self.databasePath())
-            for source in fixture.sources { try db.save(source) }
-            for item in fixture.items { try db.save(item) }
-            let savedReviews = try db.reviewItems()
-            for review in fixture.reviews where !savedReviews.contains(where: { $0.id == review.id }) { try db.save(review) }
-            let savedConflicts = try db.conflicts()
-            for conflict in fixture.conflicts where !savedConflicts.contains(where: { $0.id == conflict.id }) { try db.save(conflict) }
             // A failed read throws into the catch below; saved preferences are never replaced by defaults.
             availability = try db.loadOrCreateAvailabilitySettings()
             database = db
@@ -63,16 +53,16 @@ final class PlannerViewModel {
             if lastSuccessfulCanvasSync != nil { message = "Showing saved Oxford Canvas data. Use Sync to refresh it." }
         } catch {
             database = nil
-            items = fixture.items
-            reviews = fixture.reviews
-            sourceRecords = fixture.sources
-            conflicts = fixture.conflicts
-            message = "Local storage unavailable. Demo Mode is available with sample data in memory."
+            items = []; reviews = []; sourceRecords = []; conflicts = []
+            message = "Local storage unavailable. Reopen the app to retry; no cached data has been deleted."
+        }
+    appleCalendar.liveItems = { [weak self] in
+            guard let db = self?.database else { throw AppleCalendarError.storage }
+            return try AcademicDataset(items: db.items(), sources: db.sourceRecords()).items
         }
     }
 
     func synchronizeCanvas() {
-        guard dataMode == .live else { return }
         guard let database else { message = "Local storage is unavailable, so Canvas data cannot be saved."; return }
         guard !isSyncingCanvas else { return }
         isSyncingCanvas = true
@@ -125,23 +115,21 @@ final class PlannerViewModel {
     }
 
     var dataset: AcademicDataset {
-        AcademicDataset(mode: dataMode, items: items, sources: sourceRecords, reviews: reviews, conflicts: conflicts)
+        AcademicDataset(mode: .live, items: items, sources: sourceRecords, reviews: reviews, conflicts: conflicts)
     }
 
     var assignments: [PlanningAssignment] { dataset.assignments }
 
     /// Apple Calendar values are transient and load automatically when EventKit has previously
-    /// granted full access. Demo Mode deliberately never reads or displays personal commitments.
+    /// granted full access. Only live-provenance academic records enter production planning.
     var timelineEvents: [UnifiedTimelineEvent] {
         UnifiedTimeline.events(academicItems: dataset.items, sources: dataset.sources,
-            calendarEvents: dataMode == .live ? appleCalendar.timelineEvents : [])
+            calendarEvents: appleCalendar.timelineEvents)
     }
 
     /// Reminder due markers are display-only and never enter `timelineEvents`, planning or busy time.
-    /// Demo Mode never shows personal reminders.
     func reminderMarkers(in interval: DateInterval) -> [ReminderDueMarker] {
-        guard dataMode == .live else { return [] }
-        return RemindersPresentation.markers(items: reminders.snapshot.items, lists: reminders.snapshot.lists, in: interval)
+        RemindersPresentation.markers(items: reminders.snapshot.items, lists: reminders.snapshot.lists, in: interval)
     }
 
     func assignmentStatus(for id: String) -> AssignmentStatus { assignmentProgress[id]?.status ?? .notStarted }
@@ -209,13 +197,11 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 220, ideal: 240, max: 280)
         } detail: {
             VStack(alignment: .leading, spacing: 0) {
-                dataModeControls.padding(.horizontal, 20).padding(.vertical, 12)
-                Divider()
                 if selected == "Timeline" {
                     CalendarWorkspace(model: model, state: $calendarState, effort: assignmentEffort, priority: assignmentPriority,
                                       openReminder: openReminder)
                 } else if selected == "Reminders" {
-                    RemindersPage(model: model.reminders, isDemo: model.dataMode == .demo)
+                    RemindersPage(model: model.reminders)
                 } else {
                     ScrollView(.vertical) {
                         VStack(alignment: .leading, spacing: 20) {
@@ -250,27 +236,21 @@ struct ContentView: View {
                 Button { model.synchronizeCanvas() } label: {
                     if model.isSyncingCanvas { Label("Syncing…", systemImage: "arrow.triangle.2.circlepath") }
                     else { Label("Sync Canvas", systemImage: "arrow.clockwise") }
-                }.disabled(model.isSyncingCanvas || model.database == nil || model.dataMode == .demo)
+                }.disabled(model.isSyncingCanvas || model.database == nil)
             }
             if model.isSyncingCanvas { ToolbarItem(placement: .status) { ProgressView().controlSize(.small).help("Reading Canvas data") } }
             if model.canvasSyncHasError { ToolbarItem(placement: .status) { Label("Sync needs attention", systemImage: "exclamationmark.triangle.fill").foregroundStyle(.orange).help(model.message) } }
         }
-        .task(id: model.dataMode) {
+        .task {
             outlook.attach(model.database)
-            guard model.dataMode == .live else { return }
             while !Task.isCancelled {
                 if await outlook.poll() { model.reloadImportedData() }
                 do { try await Task.sleep(for: .seconds(60)) } catch { return }
             }
         }
-        .task(id: model.dataMode) {
+        .task {
             // Read-only Reminders: sync on launch, on EventKit changes and every 5 minutes. Never prompts.
-            guard model.dataMode == .live else { model.reminders.stopMonitoring(); return }
             model.reminders.startMonitoring()
-        }
-        .onChange(of: model.dataMode) { _, _ in refreshAppleCalendarTimeline() }
-        .onChange(of: canvasConnection.isConnected) { _, connected in
-            if connected { model.dataMode = .live }
         }
         .onAppear { refreshAppleCalendarTimeline() }
         .onChange(of: selected) { _, page in
@@ -286,21 +266,7 @@ struct ContentView: View {
         selected = "Reminders"
     }
 
-    private var dataModeControls: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Picker("Data mode", selection: $model.dataMode) {
-                ForEach(StudyDataMode.allCases, id: \.self) { Text($0.label).tag($0) }
-            }.pickerStyle(.segmented).frame(maxWidth: 360)
-                .disabled(model.isSyncingCanvas || outlook.busy)
-            Text(model.dataMode == .demo
-                 ? "Demo Mode · Sample assignments and events only. Switch to Live data to plan your academic work."
-                 : "Live data · Demonstration assignments and events are excluded from this calendar and study planning.")
-                .font(.callout).foregroundStyle(model.dataMode == .demo ? .orange : .secondary)
-        }
-    }
-
     private func refreshAppleCalendarTimeline() {
-        guard model.dataMode == .live else { return }
         model.appleCalendar.loadTimelineIfAuthorized(in: CalendarPresentation.visibleInterval(
             date: calendarState.date, mode: calendarState.mode))
     }
@@ -315,7 +281,7 @@ struct ContentView: View {
         let assignments = model.assignments
         let eligible = assignments.filter { $0.group(status: model.assignmentStatus(for: $0.id), now: now) == .active }
         return VStack(alignment: .leading, spacing: 18) {
-            heading(model.dataMode == .demo ? "Demonstration study plan" : "Study plan proposal", subtitle: "Track progress locally and plan unfinished work before its deadline")
+            heading("Study plan proposal", subtitle: "Track progress locally and plan unfinished work before its deadline")
             Text("Status is saved on this Mac. Completed and overdue assignments are excluded from new study plans.")
                 .font(.callout).foregroundStyle(.secondary)
             if let error = model.assignmentProgressError {
@@ -332,7 +298,7 @@ struct ContentView: View {
                 }
             }
             if assignments.isEmpty {
-                Text(model.dataMode == .demo ? "No demonstration assignments are available." : "No Canvas assignments are cached yet. Connect Oxford Canvas and use Sync to import them.").foregroundStyle(.secondary)
+                Text("No Canvas assignments are cached yet. Connect Oxford Canvas and use Sync to import them.").foregroundStyle(.secondary)
             } else if eligible.isEmpty {
                 Text("No unfinished assignments with future deadlines to schedule.").foregroundStyle(.secondary)
             }
@@ -356,9 +322,9 @@ struct ContentView: View {
                         Label("\(item.title): \(item.minutes) minutes could not be scheduled before the deadline.", systemImage: "exclamationmark.triangle.fill")
                             .foregroundStyle(.orange).padding(12).background(.background, in: RoundedRectangle(cornerRadius: 8))
                     }
-                    if model.dataMode == .live {
+                    Group {
                         Button("Preview Apple Calendar changes") {
-                            model.appleCalendar.prepare(snapshot, timeZone: model.availability.timeZoneIdentifier, mode: model.dataMode)
+                            model.appleCalendar.prepare(snapshot, timeZone: model.availability.timeZoneIdentifier, mode: .live)
                         }.disabled(!model.appleCalendar.ready || model.appleCalendar.hasPending || plan.blocks.isEmpty)
                         Text(model.appleCalendar.status).font(.caption).foregroundStyle(.secondary)
                     }
@@ -436,9 +402,9 @@ struct ContentView: View {
     private var reviewView: some View {
         VStack(alignment: .leading, spacing: 18) {
             heading("Review inbox", subtitle: "Tentative items stay separate until you decide")
-            if model.dataMode == .live { OutlookReviewView(model: outlook, changed: model.reloadImportedData) }
+            OutlookReviewView(model: outlook, changed: model.reloadImportedData)
             if model.dataset.reviews.isEmpty && !model.dataset.conflicts.contains(where: { $0.state == .unresolved }) {
-                Text("No items to review in this data mode.").foregroundStyle(.secondary)
+                Text("No items to review.").foregroundStyle(.secondary)
             }
             ForEach(model.dataset.conflicts.filter { $0.state == .unresolved }) { conflict in
                 VStack(alignment: .leading, spacing: 10) {
@@ -489,7 +455,7 @@ struct ContentView: View {
         VStack(alignment: .leading, spacing: 16) {
             heading("Connections", subtitle: "Manage Canvas, Microsoft Outlook, Apple Calendar, and Apple Reminders connections")
             canvasConnectionView
-            OutlookConnectionsView(model: outlook, isDemo: model.dataMode == .demo, changed: model.reloadImportedData)
+            OutlookConnectionsView(model: outlook, changed: model.reloadImportedData)
             AppleCalendarConnectionView(model: model.appleCalendar)
             RemindersConnectionView(model: model.reminders)
             Spacer()

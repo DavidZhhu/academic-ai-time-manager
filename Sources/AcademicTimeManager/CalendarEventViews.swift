@@ -45,6 +45,7 @@ struct CalendarEventBlock: View {
 struct CalendarEventInspector: View {
     let event: UnifiedTimelineEvent
     let sources: [SourceRecord]
+    var edit: (() -> Void)? = nil
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         ScrollView {
@@ -80,7 +81,12 @@ struct CalendarEventInspector: View {
                         }
                     }
                 }
-                Text("Events are read-only in this calendar.").font(.caption).foregroundStyle(.secondary)
+                if let edit {
+                    Button("Move or resize session…", action: edit)
+                        .help("Edit start/end using the keyboard, then preview and approve.")
+                } else {
+                    Label("Protected and read-only", systemImage: "lock.fill").font(.caption).foregroundStyle(.secondary)
+                }
             }.padding(24)
         }.frame(width: 480, height: 540)
     }

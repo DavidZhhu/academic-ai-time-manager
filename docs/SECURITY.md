@@ -50,3 +50,7 @@ Verify university policies, applicable data handling rules, and API terms before
 - Permission is requested only by an explicit button press (Full Access). Launch, notification and periodic paths never prompt. Revocation clears all reminder content and stops observation. Write-only access is rejected.
 - Titles, notes, URLs and list names are held in process memory only: never SQLite, source records, journals, logs, analysis providers or the network. Reminder text is untrusted display data and is never interpreted as instructions. Only http(s) URLs are kept. Demo Mode displays no reminders.
 - Reminders cannot affect scheduling or Calendar writes in Stage 1.
+
+## Stage 2 interaction boundary
+
+Pointer and keyboard actions create transient drafts only. Exact approval, journal ownership, last-confirmed snapshot comparison, conflict checks, durable write intent and read-only recovery remain the sole Calendar mutation boundary. Imported commitments are read from live-scoped SQLite at validation and approval; failures block writes. Timeline source visibility grants no permissions. Personal titles are never copied into drafts or persisted by the interaction layer. Production sample seeding/fallback has been removed without deleting legacy rows. No credential handling, OAuth callback, entitlement, signing identity or account scope changes are introduced.

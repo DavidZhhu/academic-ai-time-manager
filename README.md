@@ -23,19 +23,21 @@ A user can securely connect accounts, see imported academic events and deadlines
 
 In the running app, open **Connections**, paste your Canvas API token into the **Canvas API token** secure field, and select **Save token and test connection**. The app stores the token in macOS Keychain and checks it with a read-only request to Oxford Canvas. You can test a saved token again or remove it from Keychain in the same screen. Removing it from this app does not revoke the token in Canvas.
 
-## Live data and Demo Mode
+## Live data only
 
-The app opens in **Live data** mode, showing cached Oxford Canvas data, approved Outlook commitments, and—when full Apple Calendar access already exists—protected Apple Calendar events for the visible Timeline range. Select **Demo Mode** using the data-mode control at the top of the page to explore the preserved samples. Timeline, Plan Preview, and Review Inbox follow the same selection. Sample assignments never enter real study plans, and sample events never block real study time.
+The app shows cached Canvas data, approved Outlook commitments, Apple Calendar events, published study sessions and saved local completion statuses. There is no mode selector or demonstration source filter. An empty cache stays empty until you initiate sync; startup never inserts or falls back to samples. Older sample records remain stored but are excluded by provenance from Timeline, tasks, review and planning. No user data is deleted or migrated. Synthetic fixtures live only in the test target.
 
-Switching modes clears the current proposal without deleting records or changing completion status. Mode selection lasts for the current session; restarting returns to Live data. Sync is disabled in Demo Mode. An empty Canvas cache stays empty until you initiate a sync; it never falls back to sample assignments.
+## Interactive calendar (Stage 2)
 
-## Calendar interface (Stage 1)
+**Timeline** retains the mini-calendar/source sidebar, Day/Week/Month calendar, and resizable academic task panel. Navigate with Previous/Next (**⌘← / ⌘→**), **Today (⌘T)**, or the mini-calendar. Toggle tasks with **⌘⌥\**. Month dates open Day. Filters hide entries without removing planning constraints.
 
-**Timeline** has a mini-calendar and source filters on the left, a Day/Week/Month calendar in the centre, and an academic task panel on the right. Week and Day place events at their actual times, with overlapping events beside one another and all-day events in a separate band. Month dates open their Day view; selecting an event opens its details and source information. Deadlines have a flag and dashed border.
+In Day or Week, click an empty slot for a one-hour study proposal, or drag across empty time to select a duration. Drag a green, app-owned session to move it; drag its bottom handle to resize it. Gestures snap to 15 minutes and show a dashed proposal overlay. Releasing opens an editor; it does not save anything. Overnight sessions show a resize handle only on their final segment.
 
-Use Previous/Next or **⌘← / ⌘→**, **Today** or **⌘T**, and the Day/Week/Month selector to navigate. Toggle tasks with the toolbar's right-sidebar button or `⌘⌥\`. Panels resize; narrow week/month views scroll horizontally. Date, view, filters, and task-panel visibility survive navigation to other app pages during the session.
+For keyboard access, choose **New session (⌘N)**, or inspect an owned session and choose **Move or resize session…**. The context menu and VoiceOver action provide the same editor. Date/time fields support moving to another date; changing Start preserves duration, while End adjusts duration. The earlier/later and shorter/longer buttons adjust by 15 minutes.
 
-Source filters hide calendar entries without changing study constraints. The task panel reuses saved local completion status; effort/priority values edited in Plan preview appear there too. Event creation, dragging and resizing await Stage 2 approval. No real account or personal Calendar access was used to develop the redesign.
+Select **Review changes**, inspect the before/after dates, time zones and duration, then explicitly select **Approve exact changes**. Cancel/Escape or dismissing makes no writes. Conflicts with unfiltered Canvas/approved Outlook commitments, Calendar busy events (including all-day/recurring occurrences), and other study sessions block changes. Invalid or past ranges are rejected. Calendar setup and pending-write recovery are available in Connections; previews require an available managed calendar. Connections also retains explicitly approved cancellation and undo.
+
+Personal Apple Calendar events remain protected and read-only. Only unchanged events recognized by the ownership journal receive editing controls; original personal titles stay in transient local memory. No accounts or personal Calendar data were accessed during development. Pointer/focus/VoiceOver interaction and live account behavior require the user-led checks in [Apple Calendar integration](docs/APPLE_CALENDAR.md).
 
 ## Connect Microsoft Outlook
 
@@ -51,7 +53,7 @@ Only unfinished assignments with future deadlines receive new study sessions. Pa
 
 ## Apple Calendar
 
-When ready to test, open **Connections → Apple Calendar**, explicitly request Calendar access, select an account, and approve creation of the dedicated **Academic AI Time Manager** calendar. Generate a live plan, select **Preview Apple Calendar changes**, then approve the exact changes. Previewing alone makes no writes. Demo plans cannot be published.
+When ready to test, open **Connections → Apple Calendar**, explicitly request Calendar access, select an account, and approve creation of the dedicated **Academic AI Time Manager** calendar. Generate a live plan, select **Preview Apple Calendar changes**, then approve the exact changes. Previewing alone makes no writes.
 
 Connections also offers previewed cancellation and undo of the last event change. Once you have granted full access, restarting the app automatically loads Apple Calendar events for the active Timeline range without another permission prompt. Busy personal events appear in Timeline as orange, protected **Apple Calendar** entries with their original title. The title remains only in local transient memory; notes, locations, attendees and URLs are not retained. Green entries are study sessions owned by the app. Only owned study sessions can be changed. See [Apple Calendar integration](docs/APPLE_CALENDAR.md) for recovery limits and the user-led test-account checklist. No real calendar was accessed during development.
 

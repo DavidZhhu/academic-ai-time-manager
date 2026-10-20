@@ -15,6 +15,7 @@ final class AppleCalendarViewModel {
     var canUndo = false
     /// Transient title-only values for the Timeline. This is never saved to SQLite or the journal.
     var timelineEvents: [AppleCalendarTimelineEvent] = []
+    var liveItems: () throws -> [AcademicItem] = { throw AppleCalendarError.storage }
     private var service: AppleCalendarService?
     private var timelineInterval: DateInterval?
     private var changeObservation: (any AppleCalendarChangeObservation)?
@@ -24,7 +25,11 @@ final class AppleCalendarViewModel {
         let root = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("AcademicTimeManager", isDirectory: true)
         let value = try AppleCalendarService(client: EventKitCalendarClient(),
-            storage: FileCalendarJournalStore(url: root.appendingPathComponent("apple-calendar-ownership.json")))
+            storage: FileCalendarJournalStore(url: root.appendingPathComponent("apple-calendar-ownership.json")),
+            liveItems: { [weak self] in
+                guard let self else { throw AppleCalendarError.storage }
+                return try self.liveItems()
+            })
         service = value; return value
     }
     func invalidate() { preview = nil; service?.invalidatePreview() }
@@ -77,6 +82,24 @@ final class AppleCalendarViewModel {
             preview = try connection().preview(blocks: plan.schedule.blocks, timeZone: timeZone, mode: mode,
                 expiresAt: plan.expiresAt ?? Date().addingTimeInterval(300))
         } catch { failed(error) }
+    }
+    func draft(for event: UnifiedTimelineEvent) -> CalendarSessionDraft? {
+        guard event.isEditableStudySession, let key = event.managedKey,
+              let owned = owned.first(where: { $0.key == key }),
+              owned.event.start == event.start, owned.event.end == event.end else { return nil }
+        return CalendarSessionDraft(key: key, event: owned.event)
+    }
+    func prepareSession(_ draft: CalendarSessionDraft) throws -> CalendarPreview {
+        invalidate()
+        return try connection().previewSession(draft)
+    }
+    func approveSession(_ preview: CalendarPreview) throws {
+        do {
+            let service = try connection()
+            try service.approve(preview); reloadOwned(service)
+            if let timelineInterval { loadTimelineIfAuthorized(in: timelineInterval) }
+            status = "Approved changes saved locally. Account syncing is handled by macOS."
+        } catch { failed(error); throw error }
     }
     func cancel(key: String) {
         invalidate()
@@ -223,7 +246,7 @@ struct AppleCalendarPreviewView: View {
                     }.frame(maxWidth: .infinity, alignment: .leading)
                 }
                 HStack {
-                    Button("Dismiss") { model.invalidate() }
+                    Button("Dismiss") { model.invalidate() }.keyboardShortcut(.cancelAction)
                     Spacer()
                     Button("Approve exact changes") { model.approve() }
                         .disabled(preview.changes.isEmpty || preview.expiresAt <= Date())

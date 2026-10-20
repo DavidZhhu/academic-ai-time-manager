@@ -18,12 +18,12 @@ struct AcademicTaskPanel: View {
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 16) {
-                        ReminderTaskSection(model: model.reminders, isDemo: model.dataMode == .demo, open: openReminder)
+                        ReminderTaskSection(model: model.reminders, open: openReminder)
                         if let error = model.assignmentProgressError {
                             Label(error, systemImage: "exclamationmark.triangle").font(.caption).foregroundStyle(.orange)
                         }
                         if model.assignments.isEmpty {
-                            Text(model.dataMode == .demo ? "No sample assignments." : "No cached assignments. Use Canvas sync to import academic deadlines.")
+                            Text("No cached assignments. Use Canvas sync to import academic deadlines.")
                                 .font(.callout).foregroundStyle(.secondary)
                         }
                         ForEach(AssignmentPlanningGroup.allCases, id: \.self) { group in

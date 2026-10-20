@@ -9,8 +9,8 @@ public enum AppleCalendarError: Error, LocalizedError, Equatable {
         case .permission: "Calendar full access is required. Use Connections to request access, or review Calendar access in System Settings."
         case .unavailable: "Calendar is unavailable or read-only. Check the account in Apple Calendar, then refresh. No automatic retry was made."
         case .storage: "Calendar ownership storage is unavailable. Writes are disabled to protect existing events."
-        case .invalidPlan: "The plan contains invalid, overlapping, expired, or unsupported study sessions. Generate a new proposal."
-        case .conflict: "A calendar commitment overlaps this proposal. Refresh busy times and generate a new plan."
+        case .invalidPlan: "The plan contains invalid, overlapping, expired, or unsupported study sessions. Choose a future start and an end after it (maximum 24 hours, within the next year)."
+        case .conflict: "A calendar commitment overlaps this proposal. Choose another time and review a fresh preview."
         case .stalePreview: "The calendar or proposal changed. Review a fresh preview before approving."
         case .ownership: "A managed event was changed, moved, duplicated, or removed outside this app. It has been preserved; resolve it in Apple Calendar before retrying."
         case .uncertainWrite: "A calendar write could not be confirmed. Use Recover pending write before publishing again. If it remains unresolved, inspect Apple Calendar; do not delete the ownership file or retry blindly."
@@ -80,10 +80,11 @@ public struct AppleCalendarTimelineEvent: Equatable, Sendable, Identifiable {
     public let isAllDay: Bool
     public let source: Source
     public let titleHash: Int
+    public let managedKey: String?
     public init(id: String, title: String, start: Date, end: Date, timeZone: String,
-                isAllDay: Bool, source: Source, titleHash: Int) {
+                isAllDay: Bool, source: Source, titleHash: Int, managedKey: String? = nil) {
         self.id = id; self.title = title; self.start = start; self.end = end
-        self.timeZone = timeZone; self.isAllDay = isAllDay; self.source = source; self.titleHash = titleHash
+        self.timeZone = timeZone; self.isAllDay = isAllDay; self.source = source; self.titleHash = titleHash; self.managedKey = managedKey
     }
 }
 
@@ -174,6 +175,7 @@ public struct CalendarJournal: Codable, Sendable {
     private let client: any AppleCalendarClient
     private let storage: any CalendarJournalStore
     private let now: () -> Date
+    private let liveItems: () throws -> [AcademicItem]
     private var journal: CalendarJournal
     private var activePreview: CalendarPreview?
     private var previewIsUndo = false
@@ -183,8 +185,9 @@ public struct CalendarJournal: Codable, Sendable {
     public var hasPendingWrite: Bool { journal.pending != nil }
     public var canUndo: Bool { !journal.undoHistory.isEmpty && journal.pending == nil }
 
-    public init(client: any AppleCalendarClient, storage: any CalendarJournalStore, now: @escaping () -> Date = Date.init) throws {
-        self.client = client; self.storage = storage; self.now = now
+    public init(client: any AppleCalendarClient, storage: any CalendarJournalStore, now: @escaping () -> Date = Date.init,
+                liveItems: @escaping () throws -> [AcademicItem] = { [] }) throws {
+        self.client = client; self.storage = storage; self.now = now; self.liveItems = liveItems
         journal = try storage.load()
     }
     public func requestAccess() async throws { activePreview = nil; try await client.requestAccess(); try requireAccess() }
@@ -208,15 +211,16 @@ public struct CalendarJournal: Codable, Sendable {
     /// all-day flag, source classification, and duplicate hash is not projected.
     public func timelineEvents(in interval: DateInterval) throws -> [AppleCalendarTimelineEvent] {
         try requireAccess(); try validate(interval)
-        let owned = journal.records.values
         var seen = Set<String>()
         return try client.events(in: interval).compactMap { event in
             guard event.isBusy, event.end > event.start else { return nil }
             let occurrenceID = "\(event.id)|\(event.start.timeIntervalSinceReferenceDate)|\(event.end.timeIntervalSinceReferenceDate)"
             guard seen.insert(occurrenceID).inserted else { return nil }
-            let isManaged = owned.contains { record in
-                record.id == event.id && record.marker == event.marker && event.isSafeToModify
-            }
+            let key = journal.records.first { _, record in
+                record.id == event.id && record.sameContent(as: event) && event.isSafeToModify
+                    && event.calendarID == journal.calendarID && record.marker != nil && !event.isAllDay
+            }?.key
+            let isManaged = key != nil
             let normalized = event.title.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             let title = normalized.isEmpty
@@ -225,7 +229,7 @@ public struct CalendarJournal: Codable, Sendable {
             return AppleCalendarTimelineEvent(id: "apple-calendar:\(occurrenceID)",
                 title: title, start: event.start, end: event.end,
                 timeZone: event.timeZone, isAllDay: event.isAllDay,
-                source: isManaged ? .managed : .personal, titleHash: normalized.hashValue)
+                source: isManaged ? .managed : .personal, titleHash: normalized.hashValue, managedKey: key)
         }.sorted { $0.start == $1.start ? $0.id < $1.id : $0.start < $1.start }
     }
 
@@ -263,6 +267,26 @@ public struct CalendarJournal: Codable, Sendable {
         let preview = CalendarPreview(id: UUID(), changes: changes, createdAt: now(), expiresAt: min(expiresAt, now().addingTimeInterval(300)))
         activePreview = preview; return preview
     }
+    /// Interactive changes use journal keys directly, never the scheduler's session ordinals.
+    /// Previewing performs fresh reads only; approve() is the sole mutation path.
+    public func previewSession(_ draft: CalendarSessionDraft) throws -> CalendarPreview {
+        invalidatePreview(); try ready(); try draft.validate(now: now())
+        let before = try ownedEvent(key: draft.key)
+        if let original = draft.original {
+            guard let before, before.sameContent(as: original), !before.isAllDay else { throw AppleCalendarError.ownership }
+        }
+        let after = AppleCalendarEvent(id: before?.id ?? "", calendarID: journal.calendarID!,
+            marker: before?.marker ?? UUID().uuidString, title: draft.title, start: draft.start,
+            end: draft.end, timeZone: draft.timeZone)
+        // A retried creation is a no-op, never a new event or an implicit update.
+        if draft.original == nil, let before, !before.sameContent(as: after) { throw AppleCalendarError.stalePreview }
+        let changes = before?.sameContent(as: after) == true ? [] : [CalendarChange(key: draft.key, before: before, after: after)]
+        try checkConflicts(changes)
+        let result = CalendarPreview(id: UUID(), changes: changes, createdAt: now(), expiresAt: now().addingTimeInterval(300))
+        activePreview = result
+        return result
+    }
+
     public func managedKeys() -> [String] { journal.records.keys.sorted() }
     public func event(for key: String) -> AppleCalendarEvent? { journal.records[key] }
     public func invalidatePreview() { activePreview = nil; previewIsUndo = false }
@@ -383,11 +407,17 @@ public struct CalendarJournal: Codable, Sendable {
         return found.values.first
     }
     private func checkConflicts(_ changes: [CalendarChange]) throws {
+        let items = try liveItems() // Re-read unfiltered, live provenance at preview, approval and each write.
         let removedIDs = Set(changes.compactMap { $0.before?.id })
         let proposed = changes.compactMap(\.after)
         for (index, event) in proposed.enumerated() {
             let interval = DateInterval(start: event.start, end: event.end)
             try validate(interval)
+            guard !items.contains(where: { item in
+                // Deadlines are authoritative instants, not artificial busy durations.
+                item.kind != .deadline && (item.isProtected || item.kind == .studyBlock)
+                    && item.startsAt < event.end && item.endsAt > event.start
+            }) else { throw AppleCalendarError.conflict }
             let existing = try client.events(in: interval)
             guard !existing.contains(where: { $0.isBusy && !removedIDs.contains($0.id) && $0.start < event.end && $0.end > event.start }),
                   !proposed.prefix(index).contains(where: { $0.start < event.end && $0.end > event.start }) else {
