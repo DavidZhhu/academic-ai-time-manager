@@ -16,10 +16,27 @@ public final class LocalDatabase {
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
 
-    public init(path: String = ":memory:") throws {
+    /// Milliseconds a connection waits for another connection's lock before reporting SQLITE_BUSY.
+    public let busyTimeoutMilliseconds: Int32
+    /// The journal mode SQLite reports after opening ("wal" when write-ahead logging is active).
+    public private(set) var journalMode = ""
+
+    /// - Parameters:
+    ///   - busyTimeoutMilliseconds: Lock wait before a read or write fails with a `DatabaseError`.
+    ///   - enableWAL: Requests write-ahead logging. If the store or filesystem cannot switch, the
+    ///     existing journal mode is kept and the database remains usable. Schemas and rows are untouched.
+    public init(path: String = ":memory:", busyTimeoutMilliseconds: Int32 = 5_000, enableWAL: Bool = true) throws {
+        self.busyTimeoutMilliseconds = max(0, busyTimeoutMilliseconds)
         guard sqlite3_open(path, &handle) == SQLITE_OK, handle != nil else {
             throw DatabaseError.open("Could not open local database")
         }
+        // Must precede every other statement so setup and migration also wait instead of failing at once.
+        guard sqlite3_busy_timeout(handle, self.busyTimeoutMilliseconds) == SQLITE_OK else {
+            throw DatabaseError.open("Could not configure local database")
+        }
+        // An in-memory database reports "memory" and ignores the request; a failed switch is not fatal.
+        if enableWAL { _ = singleText("PRAGMA journal_mode=WAL;") }
+        journalMode = singleText("PRAGMA journal_mode;") ?? ""
         try migrate()
     }
 
@@ -125,6 +142,14 @@ public final class LocalDatabase {
     public func availabilitySettings() throws -> AvailabilitySettings? {
         let values: [AvailabilitySettings] = try readJSON("SELECT payload_json FROM app_settings WHERE key = 'availability';")
         return values.first
+    }
+
+    /// Returns saved availability, or stores and returns `defaultSettings` only when no row exists.
+    /// A failed or undecodable read throws and never reaches the write, so saved preferences are not replaced.
+    public func loadOrCreateAvailabilitySettings(default defaultSettings: AvailabilitySettings = AvailabilitySettings()) throws -> AvailabilitySettings {
+        if let saved = try availabilitySettings() { return saved }
+        try save(defaultSettings)
+        return defaultSettings
     }
 
     public func lastSuccessfulCanvasSync() throws -> Date? {
@@ -257,12 +282,25 @@ public final class LocalDatabase {
         return Int(sqlite3_column_int(statement, 0))
     }
 
+    /// First column of the first row of a pragma, or nil if the statement fails (for example while locked).
+    private func singleText(_ sql: String) -> String? {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK, let statement else { return nil }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW, let text = sqlite3_column_text(statement, 0) else { return nil }
+        return String(cString: text).lowercased()
+    }
+
     private func readJSON<T: Decodable>(_ sql: String) throws -> [T] {
         var statement: OpaquePointer?
         guard sqlite3_prepare_v2(handle, sql, -1, &statement, nil) == SQLITE_OK, let statement else { throw DatabaseError.prepare("Could not prepare read query") }
         defer { sqlite3_finalize(statement) }
         var values: [T] = []
-        while sqlite3_step(statement) == SQLITE_ROW {
+        while true {
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE { break }
+            // SQLITE_BUSY, I/O and corruption errors must not look like the end of the table.
+            guard result == SQLITE_ROW else { throw DatabaseError.execute(String(cString: sqlite3_errmsg(handle))) }
             guard let raw = sqlite3_column_text(statement, 0) else { continue }
             values.append(try decoder.decode(T.self, from: Data(String(cString: raw).utf8)))
         }
