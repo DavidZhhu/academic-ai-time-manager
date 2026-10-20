@@ -31,7 +31,7 @@ struct CalendarSidebar: View {
             Divider()
             VStack(alignment: .leading, spacing: 12) {
                 Text("CALENDARS").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-                ForEach(UnifiedTimelineSource.allCases, id: \.self) { source in
+                ForEach(UnifiedTimelineSource.allCases.filter { $0 != .demonstration }, id: \.self) { source in
                     Toggle(isOn: Binding(get: { state.visibleSources.contains(source) }, set: { enabled in
                         if enabled { state.visibleSources.insert(source) } else { state.visibleSources.remove(source) }
                     })) {

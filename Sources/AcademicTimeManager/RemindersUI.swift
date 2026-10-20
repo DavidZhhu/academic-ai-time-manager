@@ -99,12 +99,9 @@ struct RemindersConnectionView: View {
 
 struct RemindersPage: View {
     @Bindable var model: RemindersViewModel
-    let isDemo: Bool
     var body: some View {
         Group {
-            if isDemo {
-                emptyState("Demo Mode shows no personal reminders.", detail: "Switch to Live data to see Apple Reminders.")
-            } else if !model.isConnected {
+            if !model.isConnected {
                 emptyState("Apple Reminders is not connected.", detail: model.statusText)
             } else {
                 HSplitView {
@@ -235,11 +232,10 @@ struct ReminderDetail: View {
 
 struct ReminderTaskSection: View {
     @Bindable var model: RemindersViewModel
-    let isDemo: Bool
     var open: (String) -> Void
     @State private var expanded = true
     var body: some View {
-        if !isDemo && model.isConnected {
+        if model.isConnected {
             TimelineView(.periodic(from: .now, by: 60)) { context in
                 let groups = RemindersPresentation.upcoming(model.snapshot.items, now: context.date)
                 DisclosureGroup(isExpanded: $expanded) {

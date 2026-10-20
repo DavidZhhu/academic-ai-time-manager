@@ -9,6 +9,9 @@ struct CalendarTimeGrid: View {
     var markers: [ReminderDueMarker] = []
     var openReminder: (String) -> Void = { _ in }
     @Binding var state: CalendarPresentationState
+    let makeDraft: (UnifiedTimelineEvent) -> CalendarSessionDraft?
+    let propose: (CalendarSessionDraft) -> Void
+    @State private var ghost: CalendarSessionDraft?
     private let hourHeight: CGFloat = 72
     private let gutter: CGFloat = 52
     private var calendar: Calendar { .current }
@@ -113,23 +116,56 @@ struct CalendarTimeGrid: View {
         return GeometryReader { geometry in
             ZStack(alignment: .topLeading) {
                 Rectangle().fill(calendar.isDateInToday(day) ? Color.accentColor.opacity(0.035) : Color.clear)
+                    .contentShape(Rectangle())
+                    .onTapGesture { location in
+                        propose(CalendarInteraction.create(on: day, fromMinute: Double(location.y / hourHeight * 60)))
+                    }
+                    .gesture(DragGesture(minimumDistance: 6)
+                        .onChanged { value in ghost = selection(on: day, value: value) }
+                        .onEnded { value in
+                            propose(selection(on: day, value: value)); ghost = nil
+                        })
+                    .accessibilityHidden(true) // New session button is the keyboard/VoiceOver equivalent.
                 ForEach(0...hours, id: \.self) { hour in
                     Rectangle().fill(Color(nsColor: .separatorColor).opacity(0.5)).frame(height: 0.5)
-                        .offset(y: CGFloat(hour) * hourHeight)
+                        .offset(y: CGFloat(hour) * hourHeight).allowsHitTesting(false)
                     if interval.duration != 86400, hour < hours {
                         Text(dstHourLabel(interval.start.addingTimeInterval(Double(hour) * 3600)))
                             .font(.system(size: 9)).foregroundStyle(.secondary)
-                            .offset(x: 3, y: CGFloat(hour) * hourHeight + 1)
+                            .offset(x: 3, y: CGFloat(hour) * hourHeight + 1).allowsHitTesting(false)
                     }
                 }
                 ForEach(placements) { placement in
                     let laneWidth = geometry.size.width / CGFloat(placement.columnCount)
-                    CalendarEventBlock(event: placement.event,
-                        compact: placement.durationMinutes < 48,
-                        selected: state.selectedEventID == placement.event.id) { state.selectedEventID = placement.event.id }
-                        .frame(width: max(1, laneWidth - 4), height: max(3, CGFloat(placement.durationMinutes) / 60 * hourHeight - 1))
-                        .offset(x: CGFloat(placement.column) * laneWidth + 2, y: CGFloat(placement.startMinute) / 60 * hourHeight)
+                    Group {
+                        if placement.event.isEditableStudySession {
+                            CalendarStudyInteraction(event: placement.event, compact: placement.durationMinutes < 48,
+                                selected: state.selectedEventID == placement.event.id, day: day,
+                                dayWidth: geometry.size.width, hourHeight: hourHeight, makeDraft: makeDraft,
+                                select: { state.selectedEventID = placement.event.id },
+                                preview: { ghost = $0 }, propose: propose)
+                        } else {
+                            CalendarEventBlock(event: placement.event, compact: placement.durationMinutes < 48,
+                                selected: state.selectedEventID == placement.event.id) { state.selectedEventID = placement.event.id }
+                        }
+                    }
+                    .frame(width: max(1, laneWidth - 4), height: max(10, CGFloat(placement.durationMinutes) / 60 * hourHeight - 1))
+                    .offset(x: CGFloat(placement.column) * laneWidth + 2, y: CGFloat(placement.startMinute) / 60 * hourHeight)
                 }
+                if let ghost, ghost.end > ghost.start {
+                    ForEach(CalendarPresentation.timedPlacements([ghost.previewEvent], on: day)) { placement in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Proposed · approval required").font(.caption2.bold())
+                            Text("\(ghost.start.formatted(date: .omitted, time: .shortened)) – \(ghost.end.formatted(date: .omitted, time: .shortened))").font(.caption2)
+                        }.padding(4).frame(width: max(1, geometry.size.width - 4),
+                            height: max(20, CGFloat(placement.durationMinutes) / 60 * hourHeight), alignment: .topLeading)
+                            .background(.teal.opacity(0.25), in: RoundedRectangle(cornerRadius: 5))
+                            .overlay(RoundedRectangle(cornerRadius: 5).stroke(.teal, style: StrokeStyle(lineWidth: 2, dash: [4, 3])))
+                            .offset(x: 2, y: CGFloat(placement.startMinute) / 60 * hourHeight)
+                            .allowsHitTesting(false)
+                    }
+                }
+
                 TimelineView(.periodic(from: .now, by: 30)) { context in
                     if interval.contains(context.date), context.date < interval.end {
                         let y = CGFloat(CalendarPresentation.minuteOffset(context.date, on: day)) / 60 * hourHeight
@@ -145,6 +181,12 @@ struct CalendarTimeGrid: View {
             .overlay(alignment: .trailing) { Divider() }
             .clipped()
         }
+    }
+    private func selection(on day: Date, value: DragGesture.Value) -> CalendarSessionDraft {
+        let limit = CalendarPresentation.dayInterval(day).duration / 60
+        return CalendarInteraction.create(on: day,
+            fromMinute: min(limit - 15, max(0, Double(value.startLocation.y / hourHeight * 60))),
+            toMinute: min(limit, max(0, Double(value.location.y / hourHeight * 60))))
     }
     private func dstHourLabel(_ date: Date) -> String {
         "\(date.formatted(date: .omitted, time: .shortened)) \(calendar.timeZone.abbreviation(for: date) ?? "")"

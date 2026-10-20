@@ -7,6 +7,8 @@ struct CalendarWorkspace: View {
     let effort: [String: Int]
     let priority: [String: Int]
     var openReminder: (String) -> Void = { _ in }
+    @State private var draft: CalendarSessionDraft?
+    @State private var cancellationPreview: CalendarPreview?
     private var interval: DateInterval { CalendarPresentation.visibleInterval(date: state.date, mode: state.mode) }
     private var events: [UnifiedTimelineEvent] {
         CalendarPresentation.events(model.timelineEvents, in: interval, sources: state.visibleSources)
@@ -24,7 +26,7 @@ struct CalendarWorkspace: View {
                 navigation.padding(.horizontal, 18).padding(.vertical, 12)
                 Divider()
                 HStack(spacing: 8) {
-                    Label(model.dataMode == .demo ? "Demo Mode" : "Live data", systemImage: model.dataMode == .demo ? "sparkles" : "checkmark.shield")
+                    Label("Live data", systemImage: "checkmark.shield")
                         .fontWeight(.medium)
                     Text("· \(events.count) events" + (reminderMarkers.isEmpty ? "" : " · \(reminderMarkers.count) reminders due"))
                     Spacer()
@@ -41,17 +43,25 @@ struct CalendarWorkspace: View {
                     CalendarMonthView(events: events, markers: reminderMarkers, openReminder: openReminder, state: $state)
                 } else {
                     CalendarTimeGrid(days: CalendarPresentation.days(containing: state.date, mode: state.mode), events: events,
-                                     markers: reminderMarkers, openReminder: openReminder, state: $state)
+                                     markers: reminderMarkers, openReminder: openReminder, state: $state,
+                                     makeDraft: model.appleCalendar.draft, propose: { draft = $0 })
                 }
                 Divider()
-                if model.dataMode == .live {
+                Group {
                     VStack(alignment: .leading, spacing: 3) {
                         Label(model.message, systemImage: model.canvasSyncHasError ? "exclamationmark.triangle" : "arrow.clockwise")
                             .foregroundStyle(model.canvasSyncHasError ? .orange : .secondary).lineLimit(2).help(model.message)
                         if let date = model.lastSuccessfulCanvasSync {
                             Text("Canvas synced \(date.formatted(date: .abbreviated, time: .shortened))").foregroundStyle(.secondary)
                         }
-                        Text(model.appleCalendar.status).foregroundStyle(.secondary).lineLimit(2).help(model.appleCalendar.status)
+                        HStack {
+                            Text(model.appleCalendar.status).foregroundStyle(.secondary).lineLimit(2).help(model.appleCalendar.status)
+                            Spacer(minLength: 8)
+                            if model.appleCalendar.canUndo {
+                                Button("Preview undo…") { model.appleCalendar.undo() }
+                                    .help("Review and approve undo of the last Calendar change.")
+                            }
+                        }
                     }.font(.caption2).padding(.horizontal, 18).padding(.vertical, 8)
                 }
             }.frame(minWidth: 320)
@@ -60,10 +70,25 @@ struct CalendarWorkspace: View {
                     .frame(minWidth: 220, idealWidth: 270, maxWidth: 340)
             }
         }
-        .sheet(isPresented: Binding(get: { selectedEvent != nil }, set: { if !$0 { state.selectedEventID = nil } })) {
-            if let event = selectedEvent { CalendarEventInspector(event: event, sources: model.dataset.sources) }
+        .sheet(isPresented: Binding(get: { selectedEvent != nil || draft != nil || cancellationPreview != nil }, set: {
+            if !$0 { state.selectedEventID = nil; draft = nil; cancellationPreview = nil; model.appleCalendar.invalidate() }
+        })) {
+            if let cancellationPreview {
+                CalendarSessionCancellationView(model: model.appleCalendar, preview: cancellationPreview) {
+                    self.cancellationPreview = nil
+                }
+            } else if let draft {
+                CalendarSessionEditor(model: model.appleCalendar, draft: draft).id(draft.id)
+            } else if let event = selectedEvent {
+                CalendarEventInspector(event: event, sources: model.dataset.sources,
+                    edit: event.isEditableStudySession ? { draft = model.appleCalendar.draft(for: event) } : nil,
+                    cancel: event.isEditableStudySession ? {
+                        let preview = try model.appleCalendar.prepareCancellation(for: event)
+                        cancellationPreview = preview
+                        state.selectedEventID = nil
+                    } : nil)
+            }
         }
-        .onChange(of: model.dataMode) { _, _ in state.selectedEventID = nil }
     }
     private var navigation: some View {
         ViewThatFits(in: .horizontal) {
@@ -71,12 +96,19 @@ struct CalendarWorkspace: View {
                 dateNavigation
                 Spacer(minLength: 12)
                 viewPicker
+                newSessionButton
             }
             VStack(alignment: .leading, spacing: 10) {
                 dateNavigation
-                viewPicker
+                HStack { viewPicker; newSessionButton }
             }
         }
+    }
+    private var newSessionButton: some View {
+        Button { draft = CalendarInteraction.create(on: state.date, fromMinute: 9 * 60) } label: {
+            Label("New session", systemImage: "plus")
+        }.keyboardShortcut("n", modifiers: .command)
+            .help("Propose a study session. Review and approval are required before saving.")
     }
     private var dateNavigation: some View {
         HStack(spacing: 8) {

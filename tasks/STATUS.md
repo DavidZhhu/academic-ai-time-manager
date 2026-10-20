@@ -1,8 +1,54 @@
 # Development Status
 
-Updated: 2026-10-19 (Europe/London)
+Updated: 2026-10-20 (Europe/London)
 
-Current position: **M0–M1 complete; Canvas sync, local completion tracking, demo/live separation, Microsoft Outlook integration, and unified Apple Calendar Timeline display are integrated on main and verified with fixtures. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
+Current position: **M0–M1 complete; Canvas sync, local completion tracking, Microsoft Outlook integration, and unified Apple Calendar Timeline display are integrated on main. Stage 2 interactive controls and cancellation follow-up are on draft PR #7. The production UI uses Live Data only. M2–M5 remain partial overall; real Microsoft sign-in awaits user registration and consent.** No live Canvas, Outlook, Apple Calendar, or AI provider access occurred during this development work.
+
+## Stage 2 PR #7 follow-up — Timeline cancellation (2026-10-20)
+
+Expected behavior: Event details for an unchanged app-owned session offers **Cancel study session…**; review names the exact title, date, time and dedicated calendar. Only explicit approval removes that session. Dismissal, ownership mismatch, personal events, external edits and pending writes leave events untouched; a confirmed cancellation refreshes Timeline and can be undone through a separately approved preview. Unsafe events explain the recovery path in Event details.
+
+Implementation: Added a snapshot-bound `previewCancellation` service entry point, a dedicated review sheet and Event details action, plus a visible Timeline **Preview undo…** control. The service reuses the existing journal, marker/calendar checks, preview expiry, per-write ownership recheck, durable write intent, undo history and read-only interrupted-write recovery. No account, credential, production database or personal Calendar data was accessed; tests use only synthetic mock events and a memory journal. Five new tests cover approved single-session removal, dismissal without writes, personal/unknown keys, stale or externally edited ownership, and separately approved undo. Live EventKit UI behavior remains a user-led test-account check.
+
+Validation: debug **219 passed, 0 failures**; release **219 passed, 0 failures**. Release SwiftPM manifest loading required an approved run outside the sandbox after `sandbox_apply: Operation not permitted`. `scripts/package-macos.sh` rebuilt and verified the signed local app, including plist validity, designated requirement and stable identifier `org.example.AcademicTimeManager` under Apple Development team `4JXVG992V7`. No real account or personal Calendar access was performed. The branch is `feature/interactive-calendar`; push updates draft PR #7 without merging.
+
+
+## Completed task — interactive calendar Stage 2 (2026-10-20)
+
+Implemented on `feature/interactive-calendar`, rebased onto `origin/main` at `6e213db`. The branch and a clean working tree were verified before edits; `main` and unrelated worktrees remain untouched. Two pre-existing empty untracked files (`1558718`, `FETCH_HEAD`) were preserved under `/private/tmp/academic-calendar-stage2-preserved/` before work started. No live Canvas, Outlook, Apple Calendar, Keychain item, OAuth flow, production database, or personal data was accessed.
+
+### Delivered behavior
+
+- Day and Week now support a one-hour empty-slot proposal on click and a 15-minute-snapped range proposal on drag. Green app-owned timed sessions can be dragged across dates/times and resized from a bottom handle. Each gesture displays a dashed preview before opening the editor. Month remains read-only apart from opening its Day view.
+- `⌘N`, the owned event inspector, context menu, VoiceOver edit action, date/time fields and 15-minute adjustment buttons provide keyboard-accessible creation, movement and resize alternatives. A move keeps duration; a resize keeps start. The review presents before/after values, time-zone abbreviation, duration, a separate Cancel path and an explicit **Approve exact changes** control.
+- Interactive proposals share the existing exact approval, ownership journal, durable write intent, cancellation, undo and interrupted-write recovery flow. App-owned identity is stable for an individual scheduled slot; stale editors and changed retry requests cannot overwrite another edit or produce duplicates.
+- Each preview, approval and per-operation rechecks unfiltered, live-scoped Canvas/approved Outlook commitments, existing study sessions and freshly read EventKit busy occurrences. Hidden filters do not weaken constraints. Invalid/past/overlong ranges, all-day/recurring Calendar occurrences, personal events and new conflicts block writes.
+- Personal Apple Calendar events remain protected. Timeline grants editing only if an occurrence still matches its journal marker, calendar, last-confirmed snapshot and safe-modification state. Original Apple titles remain transient local rendering values only.
+- The Live/Demo selector, user-facing demonstration source filter, production sample seeding and local-storage fallback are removed. Production always scopes live provenance and preserves existing imported records and completion status without a database migration. `SampleData` now lives only in the test target, and legacy fixture rows remain excluded by their provenance.
+
+### Files changed
+
+- New `Sources/AcademicCore/CalendarInteraction.swift`: draft, validation, snapping, creation/move/resize transformations.
+- Updated `Sources/AcademicCore/AppleCalendar.swift` and `UnifiedTimeline.swift`: safe interactive single-session previews, live constraint reader and journal-key-gated editability.
+- New `Sources/AcademicTimeManager/CalendarSessionEditor.swift` and `CalendarStudyInteraction.swift`; updated calendar workspace/grid/event UI and Calendar view model for pointer, keyboard, accessible and review interactions.
+- Updated `App.swift`, Outlook UI, sidebar and task panel to make Live Data the sole production mode; moved sample fixtures into `Tests/AcademicTimeManagerTests/SampleData.swift`.
+- New `CalendarInteractionTests.swift`; expanded `AppleCalendarTests.swift`; updated README, Architecture, Apple Calendar, Security and this status report.
+
+### Verification
+
+- Debug `swift test` for the original Stage 2 delivery: **214 passed, 0 failures** after the Reminders integration rebase. The cancellation follow-up raises this to **219 passed**.
+- Release `swift test -c release` for the original Stage 2 delivery: **214 passed, 0 failures** after the Reminders integration rebase. The cancellation follow-up raises this to **219 passed**.
+- New coverage exercises creation, 15-minute snapping, Day/Week moves, resizing, keyboard draft validation, DST selection, invalid ranges, Canvas/Outlook/EventKit/study conflicts at preview and approval, hidden constraints, all-day/recurring occurrences, personal/in-managed-calendar protection, external edits, cancellation, undo, stable slot identity, duplicate retries, offline/revoked access and interrupted-write recovery.
+- Synthetic SwiftUI/AppKit renders exercised production calendar components in Day, Week, Month, narrow, dark and session-editor layouts. The harness substitutes in-memory data and does not construct the production app model, database, EventKit client or credential stores.
+- `git diff --check` passed. Release packaging through `scripts/package-macos.sh` rebuilt `build-output/AcademicTimeManager.app`, retained `AcademicTimeManager.icns`, `org.example.AcademicTimeManager`, the Microsoft OAuth callback and the Apple Development signing identity. The script's strict/deep signature, stable designated-requirement and plist checks passed. A direct signature probe inside the restricted sandbox could not access the Apple trust chain; this does not invalidate the successful packaging verification outside it.
+
+### Remaining limits and user-led checks
+
+- Use a dedicated test Calendar account and synthetic future sessions to exercise actual EventKit interactions, pointer focus/VoiceOver, narrow-window behavior, offline propagation and remote Calendar delivery. No production app launch or live account test is claimed.
+- Dragging does not auto-scroll at a Day/Week edge; use the editor date/time controls to target ranges outside the current visible grid. Dense overlapping labels remain an interface refinement opportunity.
+- EventKit can confirm local-store save only; macOS owns remote account synchronization. Developer ID distribution, notarization and broad MVP hardening remain separate work.
+
+Git delivery: Stage 2 is on draft PR #7 targeting `main`; the cancellation follow-up updates the same feature branch. No merge, force-push or repository-setting change is authorized.
 
 ## Latest task — Apple Reminders Stage 1, read-only (2026-10-20)
 
@@ -12,7 +58,7 @@ Branch `feature/apple-reminders-integration`, based on `main` (`c2ece4d`). Detai
 - Read-only EventKit Reminders: explicit Full Access request from Connections only; launch, change-notification (coalesced) and 5-minute refresh never prompt. Revocation, write-only access, failed reads, missing lists, deleted reminders, duplicates and recurring reminders are handled; permission loss clears in-memory content.
 - Imports title, notes, due date (date-only vs timed, time zone), priority, completion, http(s) URL, recurrence flag, device + external IDs and list/source info across all lists. Subtasks: model and UI support `parentID`, but the public EventKit API exposes no hierarchy, so none is imported (documented).
 - UI: Reminders page (list navigation, reminder list, details, completion indicators, due dates), Reminders section in the collapsible Academic Tasks panel, due-date markers in Day/Week/Month (not busy time, sidebar toggle), Connections card, Info.plist `NSRemindersFullAccessUsageDescription`.
-- Content is memory-only, never persisted, never sent to AI/cloud; Demo Mode shows none. Nothing is written to Reminders; test-enforced.
+- Content is memory-only, never persisted, never sent to AI/cloud. Nothing is written to Reminders; test-enforced.
 - Not implemented (by design): write-back, conflict resolution, deletion history, AI estimates/scheduling, subtask scheduling, Canvas duplicate linking, Calendar publishing of reminders.
 
 ### Files

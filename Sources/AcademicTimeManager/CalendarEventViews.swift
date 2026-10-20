@@ -45,6 +45,9 @@ struct CalendarEventBlock: View {
 struct CalendarEventInspector: View {
     let event: UnifiedTimelineEvent
     let sources: [SourceRecord]
+    var edit: (() -> Void)? = nil
+    var cancel: (() throws -> Void)? = nil
+    @State private var cancellationError: String?
     @Environment(\.dismiss) private var dismiss
     var body: some View {
         ScrollView {
@@ -80,7 +83,30 @@ struct CalendarEventInspector: View {
                         }
                     }
                 }
-                Text("Events are read-only in this calendar.").font(.caption).foregroundStyle(.secondary)
+                if let edit {
+                    Button("Move or resize session…", action: edit)
+                        .help("Edit start/end using the keyboard, then preview and approve.")
+                    if let cancel {
+                        Button("Cancel study session…", role: .destructive) {
+                            do { try cancel() }
+                            catch {
+                                cancellationError = (error as? AppleCalendarError)?.localizedDescription
+                                    ?? "Calendar could not verify this session. Refresh Calendar in Connections and inspect the event before retrying."
+                            }
+                        }.help("Review the exact session before approving its cancellation.")
+                    }
+                } else {
+                    Label("Protected and read-only", systemImage: "lock.fill").font(.caption).foregroundStyle(.secondary)
+                    if event.source == .appleCalendar {
+                        Text("This Calendar event cannot be cancelled here. If it was previously a study session, refresh Calendar in Connections and inspect any external changes before retrying. Your event remains unchanged.")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                if let cancellationError {
+                    Text(cancellationError).font(.callout).foregroundStyle(.orange)
+                    Text("Open Connections to refresh Calendar or recover a pending write. Resolve external changes in Apple Calendar before making a fresh proposal.")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
             }.padding(24)
         }.frame(width: 480, height: 540)
     }

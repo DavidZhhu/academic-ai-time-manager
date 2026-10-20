@@ -60,9 +60,9 @@ final class AppleCalendarTests: XCTestCase {
         ScheduledStudyBlock(id: "\(task)-\(offset)", taskID: task, title: title, startAt: instant.addingTimeInterval(offset),
             endAt: instant.addingTimeInterval(offset + 1800), sourceRecordIDs: ["source"])
     }
-    @MainActor private func setup() throws -> (AppleCalendarService, MockCalendar, MemoryCalendarJournal) {
+    @MainActor private func setup(liveItems: @escaping () throws -> [AcademicItem] = { [] }) throws -> (AppleCalendarService, MockCalendar, MemoryCalendarJournal) {
         let client = MockCalendar(); let storage = MemoryCalendarJournal(); let now = instant
-        let service = try AppleCalendarService(client: client, storage: storage, now: { now })
+        let service = try AppleCalendarService(client: client, storage: storage, now: { now }, liveItems: liveItems)
         try service.createCalendar(sourceID: "local", approved: true)
         return (service, client, storage)
     }
@@ -575,4 +575,272 @@ final class AppleCalendarTests: XCTestCase {
         XCTAssertFalse(try XCTUnwrap(JSONDecoder().decode(CalendarJournal.self, from: data).records["slot"]).isAllDay)
     }
 
+}
+
+extension AppleCalendarTests {
+    private func sessionDraft(_ offset: Double = 3600) -> CalendarSessionDraft {
+        CalendarSessionDraft(start: instant.addingTimeInterval(offset), end: instant.addingTimeInterval(offset + 1800))
+    }
+    @MainActor func testInteractiveCreationPreviewCancelApprovalReplayAndRestartDeduplication() throws {
+        let (service, client, storage) = try setup()
+        let draft = sessionDraft()
+        let canceled = try service.previewSession(draft)
+        XCTAssertEqual(client.writes, 0); XCTAssertTrue(storage.value.records.isEmpty)
+        service.invalidatePreview()
+        XCTAssertThrowsError(try service.approve(canceled))
+        let approved = try service.previewSession(draft)
+        try service.approve(approved)
+        XCTAssertEqual(client.writes, 1)
+        XCTAssertThrowsError(try service.approve(approved))
+        let restarted = try AppleCalendarService(client: client, storage: storage, now: { self.instant })
+        XCTAssertTrue(try restarted.previewSession(draft).changes.isEmpty)
+        var changedRetry = draft; changedRetry.end = draft.end.addingTimeInterval(900)
+        XCTAssertThrowsError(try restarted.previewSession(changedRetry))
+        XCTAssertEqual(client.values.count, 1)
+    }
+    @MainActor func testInteractiveMoveResizeUndoAndCancellationKeepOriginalEventIdentity() throws {
+        let (service, client, storage) = try setup()
+        let creation = sessionDraft()
+        try service.approve(service.previewSession(creation))
+        let original = try XCTUnwrap(service.event(for: creation.key))
+        let draft = CalendarSessionDraft(key: creation.key, event: original)
+        var moved = draft; moved.start = draft.start.addingTimeInterval(86400); moved.end = draft.end.addingTimeInterval(86400)
+        let preview = try service.previewSession(moved)
+        XCTAssertEqual(client.values[0], original, "Pointer proposals never move the stored event")
+        XCTAssertEqual(preview.changes[0].before, original)
+        try service.approve(preview)
+        XCTAssertEqual(client.values[0].id, original.id)
+        let movedEvent = try XCTUnwrap(service.event(for: creation.key))
+        let resize = CalendarInteraction.resize(CalendarSessionDraft(key: creation.key, event: movedEvent), byMinutes: 30)
+        try service.approve(service.previewSession(resize))
+        XCTAssertEqual(client.values[0].end, movedEvent.end.addingTimeInterval(1800))
+        try service.approve(service.previewUndo())
+        XCTAssertEqual(client.values[0], movedEvent)
+        try service.approve(service.previewUndo())
+        XCTAssertEqual(client.values[0], original)
+        let cancel = try self.preview(service, blocks: [], cancel: [creation.key])
+        XCTAssertEqual(client.values.count, 1)
+        try service.approve(cancel); XCTAssertTrue(client.values.isEmpty)
+        try service.approve(service.previewUndo()); XCTAssertEqual(client.values.count, 1)
+        XCTAssertEqual(storage.value.records.count, 1)
+    }
+    @MainActor func testInteractiveStaleEditorCannotOverwriteAnotherEdit() throws {
+        let (service, client, _) = try setup()
+        let draft = sessionDraft(); try service.approve(service.previewSession(draft))
+        let original = try XCTUnwrap(service.event(for: draft.key))
+        let first = CalendarInteraction.resize(CalendarSessionDraft(key: draft.key, event: original), byMinutes: 30)
+        try service.approve(service.previewSession(first))
+        XCTAssertThrowsError(try service.previewSession(CalendarSessionDraft(key: draft.key, event: original)))
+        XCTAssertEqual(client.writes, 2)
+    }
+    @MainActor func testInteractiveConflictsWithLiveCanvasAndApprovedOutlookAtPreviewAndApproval() throws {
+        for provider in ["Canvas", "Outlook"] {
+            var commitments: [AcademicItem] = []
+            let source = SourceRecord(id: provider, provider: provider, externalID: "fixture", retrievedAt: instant)
+            let (service, client, _) = try setup {
+                AcademicDataset(items: commitments, sources: [source]).items
+            }
+            let draft = sessionDraft()
+            let proposal = try service.previewSession(draft)
+            commitments = [AcademicItem(id: "busy", title: "Fixture", startsAt: draft.start, endsAt: draft.end,
+                timeZoneIdentifier: "UTC", kind: .tutorial, verification: .verified, sourceRecordIDs: [source.id], isProtected: true)]
+            XCTAssertThrowsError(try service.approve(proposal)) { XCTAssertEqual($0 as? AppleCalendarError, .conflict) }
+            XCTAssertThrowsError(try service.previewSession(draft)) { XCTAssertEqual($0 as? AppleCalendarError, .conflict) }
+            XCTAssertEqual(client.writes, 0)
+        }
+    }
+    @MainActor func testInteractiveHiddenStudyAndAllDayRecurringOccurrencesStillBlock() throws {
+        for allDay in [false, true] {
+            let (service, client, _) = try setup()
+            let draft = sessionDraft()
+            client.values = [AppleCalendarEvent(id: "recurrence-occurrence", calendarID: "personal", marker: nil,
+                title: "Private recurring title", start: instant, end: instant.addingTimeInterval(86400), timeZone: "UTC",
+                isSafeToModify: false, isAllDay: allDay)]
+            XCTAssertThrowsError(try service.previewSession(draft))
+            XCTAssertEqual(client.writes, 0)
+        }
+        let (service, client, _) = try setup()
+        let draft = sessionDraft(); try service.approve(service.previewSession(draft))
+        XCTAssertThrowsError(try service.previewSession(sessionDraft(4000)))
+        // Half-open boundaries allow adjacent sessions.
+        try service.approve(service.previewSession(sessionDraft(5400)))
+        XCTAssertEqual(client.values.count, 2)
+    }
+    @MainActor func testInteractiveProtectsPersonalEventsEvenInsideManagedCalendar() throws {
+        let (service, client, storage) = try setup()
+        let personal = AppleCalendarEvent(id: "personal", calendarID: "managed", marker: nil, title: "Private title",
+            start: instant.addingTimeInterval(3600), end: instant.addingTimeInterval(5400), timeZone: "UTC")
+        client.values = [personal]
+        let malicious = CalendarSessionDraft(key: "unowned", event: personal)
+        XCTAssertThrowsError(try service.previewSession(malicious)) { XCTAssertEqual($0 as? AppleCalendarError, .ownership) }
+        let projection = try service.timelineEvents(in: DateInterval(start: instant, duration: 86400))
+        XCTAssertEqual(projection[0].title, personal.title); XCTAssertNil(projection[0].managedKey)
+        XCTAssertEqual(projection[0].source, .personal)
+        XCTAssertEqual(client.values, [personal]); XCTAssertEqual(client.writes, 0)
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(storage.value), as: UTF8.self).contains("Private title"))
+    }
+    @MainActor func testInteractiveExternalChangesLoseEditingCapabilityAndCannotBeOverwritten() throws {
+        for change in 0..<4 {
+            let (service, client, _) = try setup()
+            let draft = sessionDraft(); try service.approve(service.previewSession(draft))
+            let owned = try XCTUnwrap(service.event(for: draft.key))
+            switch change {
+            case 0: client.values[0].title = "Externally edited"
+            case 1: client.values[0].calendarID = "personal"
+            case 2: client.values[0].isSafeToModify = false
+            default: client.values[0].isAllDay = true
+            }
+            let events = try service.timelineEvents(in: DateInterval(start: instant, duration: 86400))
+            XCTAssertNil(events[0].managedKey); XCTAssertEqual(events[0].source, .personal)
+            XCTAssertThrowsError(try service.previewSession(CalendarSessionDraft(key: draft.key, event: owned)))
+            XCTAssertEqual(client.writes, 1)
+        }
+    }
+    @MainActor func testInteractiveInterruptedWriteRecoversWithoutRetryAndCanUndo() throws {
+        let (service, client, storage) = try setup()
+        client.failAfterWrite = true
+        let draft = sessionDraft()
+        XCTAssertThrowsError(try service.approve(service.previewSession(draft)))
+        XCTAssertTrue(service.hasPendingWrite)
+        XCTAssertThrowsError(try service.previewSession(draft))
+        let restarted = try AppleCalendarService(client: client, storage: storage, now: { self.instant })
+        try restarted.recoverPendingWrite()
+        XCTAssertFalse(restarted.hasPendingWrite); XCTAssertEqual(client.writes, 1)
+        client.failAfterWrite = false
+        try restarted.approve(restarted.previewUndo())
+        XCTAssertTrue(client.values.isEmpty)
+    }
+    @MainActor func testLiveConstraintReadFailureBlocksInteractiveWriteAndUndoRechecksImports() throws {
+        var readFailure = false
+        var items: [AcademicItem] = []
+        let (service, client, _) = try setup {
+            if readFailure { throw AppleCalendarError.storage }
+            return items
+        }
+        let draft = sessionDraft(); let preview = try service.previewSession(draft)
+        readFailure = true
+        XCTAssertThrowsError(try service.approve(preview)); XCTAssertEqual(client.writes, 0)
+        readFailure = false
+        try service.approve(service.previewSession(draft))
+        let event = try XCTUnwrap(service.event(for: draft.key))
+        var moved = CalendarSessionDraft(key: draft.key, event: event)
+        moved.start = moved.start.addingTimeInterval(86400); moved.end = moved.end.addingTimeInterval(86400)
+        try service.approve(service.previewSession(moved))
+        items = [AcademicItem(id: "imported", title: "New commitment", startsAt: draft.start, endsAt: draft.end,
+            timeZoneIdentifier: "UTC", kind: .classSession, verification: .verified, sourceRecordIDs: ["live"], isProtected: true)]
+        XCTAssertThrowsError(try service.previewUndo())
+        XCTAssertEqual(client.writes, 2)
+    }
+}
+
+extension AppleCalendarTests {
+    @MainActor func testInspectorCancellationRequiresApprovalAndRemovesOnlySelectedSession() throws {
+        let (service, client, storage) = try setup()
+        let first = sessionDraft(); let second = sessionDraft(7200)
+        try service.approve(service.previewSession(first))
+        try service.approve(service.previewSession(second))
+        let personal = AppleCalendarEvent(id: "private", calendarID: "managed", marker: nil,
+            title: "Private meeting", start: instant.addingTimeInterval(11000),
+            end: instant.addingTimeInterval(12800), timeZone: "Europe/London")
+        client.values.append(personal)
+        let original = try XCTUnwrap(service.event(for: first.key))
+        let proposal = try service.previewCancellation(key: first.key, expected: original)
+        XCTAssertEqual(proposal.changes.count, 1)
+        XCTAssertEqual(proposal.changes.first?.before, original)
+        XCTAssertNil(proposal.changes.first?.after)
+        XCTAssertEqual(client.writes, 2)
+        XCTAssertEqual(client.values.count, 3)
+        try service.approve(proposal)
+        XCTAssertNil(service.event(for: first.key))
+        XCTAssertNotNil(service.event(for: second.key))
+        XCTAssertTrue(client.values.contains(personal))
+        XCTAssertEqual(client.writes, 3)
+        XCTAssertEqual(storage.value.audit.last?.action, "confirmed")
+    }
+
+    @MainActor func testInspectorCancellationDismissalCannotRemoveSession() throws {
+        let (service, client, _) = try setup()
+        let draft = sessionDraft(); try service.approve(service.previewSession(draft))
+        let original = try XCTUnwrap(service.event(for: draft.key))
+        let proposal = try service.previewCancellation(key: draft.key, expected: original)
+        service.invalidatePreview()
+        XCTAssertThrowsError(try service.approve(proposal)) {
+            XCTAssertEqual($0 as? AppleCalendarError, .stalePreview)
+        }
+        XCTAssertEqual(service.event(for: draft.key), original)
+        XCTAssertEqual(client.writes, 1)
+    }
+
+    @MainActor func testInspectorCancellationRejectsPersonalAndUnknownKeys() throws {
+        let (service, client, _) = try setup()
+        let personal = AppleCalendarEvent(id: "personal", calendarID: "managed", marker: nil,
+            title: "Personal", start: instant.addingTimeInterval(3600),
+            end: instant.addingTimeInterval(5400), timeZone: "Europe/London")
+        client.values.append(personal)
+        XCTAssertThrowsError(try service.previewCancellation(key: "unowned", expected: personal)) {
+            XCTAssertEqual($0 as? AppleCalendarError, .ownership)
+        }
+        XCTAssertEqual(client.values, [personal]); XCTAssertEqual(client.writes, 0)
+    }
+
+    @MainActor func testInspectorCancellationRejectsSnapshotMismatchAndExternalEdit() throws {
+        let (service, client, _) = try setup()
+        let draft = sessionDraft(); try service.approve(service.previewSession(draft))
+        let original = try XCTUnwrap(service.event(for: draft.key))
+        var mismatched = original; mismatched.title = "Different session"
+        XCTAssertThrowsError(try service.previewCancellation(key: draft.key, expected: mismatched)) {
+            XCTAssertEqual($0 as? AppleCalendarError, .ownership)
+        }
+        let proposal = try service.previewCancellation(key: draft.key, expected: original)
+        client.values[0].title = "Externally edited"
+        XCTAssertThrowsError(try service.approve(proposal)) {
+            XCTAssertEqual($0 as? AppleCalendarError, .ownership)
+        }
+        XCTAssertEqual(client.values[0].title, "Externally edited")
+        XCTAssertEqual(client.writes, 1)
+        XCTAssertThrowsError(try service.previewCancellation(key: draft.key, expected: original))
+    }
+
+    @MainActor func testInspectorCancellationUndoRequiresItsOwnApproval() throws {
+        let (service, client, _) = try setup()
+        let draft = sessionDraft(); try service.approve(service.previewSession(draft))
+        let original = try XCTUnwrap(service.event(for: draft.key))
+        try service.approve(service.previewCancellation(key: draft.key, expected: original))
+        XCTAssertTrue(client.values.isEmpty)
+        let undo = try service.previewUndo()
+        XCTAssertTrue(client.values.isEmpty)
+        service.invalidatePreview()
+        XCTAssertThrowsError(try service.approve(undo))
+        try service.approve(service.previewUndo())
+        XCTAssertEqual(client.values.count, 1)
+        XCTAssertEqual(client.values[0].title, original.title)
+        XCTAssertEqual(client.values[0].start, original.start)
+        XCTAssertEqual(client.writes, 3)
+    }
+
+    @MainActor func testInteractiveMoveTargetsSecondScheduledSlotWithoutRenumberingOrDuplicates() throws {
+        let (service, client, storage) = try setup()
+        try service.approve(preview(service, blocks: [block(), block(7200)]))
+        let keys = service.managedKeys()
+        let first = try XCTUnwrap(service.event(for: keys[0]))
+        let second = try XCTUnwrap(service.event(for: keys[1]))
+        var draft = CalendarSessionDraft(key: keys[1], event: second)
+        draft.start = first.start.addingTimeInterval(-1800); draft.end = first.start
+        try service.approve(service.previewSession(draft))
+        XCTAssertEqual(service.event(for: keys[0]), first)
+        XCTAssertEqual(service.event(for: keys[1])?.id, second.id)
+        XCTAssertEqual(service.event(for: keys[1])?.start, draft.start)
+        XCTAssertEqual(client.values.count, 2); XCTAssertEqual(storage.value.records.count, 2)
+    }
+    @MainActor func testInteractivePreviewRejectsOfflineReadsAndRevokedAccessWithoutWrites() throws {
+        let (service, client, _) = try setup()
+        let draft = sessionDraft()
+        client.readError = true
+        XCTAssertThrowsError(try service.previewSession(draft))
+        client.readError = false
+        let preview = try service.previewSession(draft)
+        client.access = .denied
+        XCTAssertThrowsError(try service.approve(preview)) { XCTAssertEqual($0 as? AppleCalendarError, .permission) }
+        XCTAssertEqual(client.writes, 0); XCTAssertEqual(client.permissionRequests, 0)
+    }
 }

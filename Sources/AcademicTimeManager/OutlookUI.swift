@@ -159,7 +159,6 @@ final class OutlookViewModel {
 
 struct OutlookConnectionsView: View {
     @Bindable var model: OutlookViewModel
-    let isDemo: Bool
     let changed: () -> Void
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -169,7 +168,7 @@ struct OutlookConnectionsView: View {
             Text("Register organisational + personal accounts and the desktop redirect: \(MicrosoftAuthorization.redirectURI)")
                 .font(.caption).textSelection(.enabled)
             Button("Add Microsoft account") { Task { await model.connect() } }
-                .disabled(isDemo || !model.available || model.busy || UUID(uuidString: model.state.settings.clientID.trimmingCharacters(in: .whitespacesAndNewlines)) == nil)
+                .disabled(!model.available || model.busy || UUID(uuidString: model.state.settings.clientID.trimmingCharacters(in: .whitespacesAndNewlines)) == nil)
             Text(model.status).foregroundStyle(model.error ? .orange : .secondary).fixedSize(horizontal: false, vertical: true)
             if model.busy { ProgressView().controlSize(.small) }
             ForEach(model.state.accounts) { account in
@@ -182,7 +181,7 @@ struct OutlookConnectionsView: View {
                         Button("Test connection") { Task { await model.test(account) } }.disabled(!account.connected)
                         Button("Synchronise now") { Task { if await model.sync(account) { changed() } } }.disabled(!account.connected)
                         Button("Disconnect", role: .destructive) { model.disconnectID = account.id }
-                    }.disabled(model.busy || isDemo)
+                    }.disabled(model.busy)
                 }.padding(12).frame(maxWidth: .infinity, alignment: .leading).background(.quaternary, in: RoundedRectangle(cornerRadius: 8))
             }
             DisclosureGroup("Shared classification and privacy settings") {
